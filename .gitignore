@@ -1,0 +1,12 @@
+venv/
+.env
+data/chroma_db/
+data/processed/
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+*.egg-info/
+dist/
+build/
+data/topics.json
