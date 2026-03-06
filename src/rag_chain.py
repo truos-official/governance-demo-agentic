@@ -1,8 +1,8 @@
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from elastic_retriever import connect, hybrid_search
-from prompt_library import get_prompt
+from src.elastic_retriever import connect, hybrid_search
+from src.prompt_library import get_prompt
 
 load_dotenv()
 
