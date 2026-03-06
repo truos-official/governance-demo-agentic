@@ -1,14 +1,10 @@
-from fastapi import FastAPI
 from pydantic import BaseModel
 from src.rag_chain import build_chain
 from src.topic_classifier import load_topics, classify_query
+from src.security import run_security_checks
+from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
-
-class QueryRequest(BaseModel):
-    question: str
-    prompt_type: str="factual"  # "factual" or "opinion"
-    topic: str="AI Governance"  # "AI Governance", "AI Ethics", "AI Safety", "AI Policy"
 
 class QueryResponse(BaseModel):
     answer: str
@@ -16,8 +12,18 @@ class QueryResponse(BaseModel):
 class ClassifyRequest(BaseModel):
     question: str
 
+class QueryRequest(BaseModel):
+    question: str
+    prompt_type: str = "factual"
+    topic: str = "AI Governance"
+    user_id: str = "anonymous"
+
 @app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
+    security = run_security_checks(request.question, request.user_id)
+    if not security["passed"]:
+        raise HTTPException(status_code=400, detail=security)
+    
     chain = build_chain(prompt_type=request.prompt_type, topic=request.topic)
     answer = chain(request.question)
     return QueryResponse(answer=answer)
