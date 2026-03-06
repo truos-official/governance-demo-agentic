@@ -14,12 +14,15 @@ def build_chain(prompt_type: str = "factual", topic: str = "AI Governance"):
     client=connect()
     
 
-    def chain(query: str) -> str:
+    def chain(query: str) -> dict:
         results = hybrid_search(client, query)
         context = "\n\n".join([r['_source']['content'] for r in results])
         formatted_prompt = prompt.format(context=context, question=query, topic=topic)
         response = llm.invoke(formatted_prompt)
-        return response.content
+        return {
+           "answer": response.content,
+          "context": context
+        }
 
     return chain
 
