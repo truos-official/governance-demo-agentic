@@ -3,6 +3,7 @@ from src.rag_chain import build_chain
 from src.topic_classifier import load_topics, classify_query
 from src.security import run_security_checks
 from fastapi import FastAPI, HTTPException
+from src.security import run_security_checks, anonymize_pii
 
 app = FastAPI()
 
@@ -24,8 +25,10 @@ def query(request: QueryRequest):
     if not security["passed"]:
         raise HTTPException(status_code=400, detail=security)
     
+    clean_query = anonymize_pii(request.question)
+    
     chain = build_chain(prompt_type=request.prompt_type, topic=request.topic)
-    answer = chain(request.question)
+    answer = chain(clean_query)
     return QueryResponse(answer=answer)
 
 @app.get("/topics")

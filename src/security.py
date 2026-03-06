@@ -1,12 +1,17 @@
-import time
 import re
+import time
 import collections
 from dotenv import load_dotenv
-
-request_counts = collections.defaultdict(list)
-RATE_LIMIT = 10  # requests per minute
+from presidio_analyzer import AnalyzerEngine
+from presidio_anonymizer import AnonymizerEngine
 
 load_dotenv()
+
+analyzer = AnalyzerEngine()
+anonymizer = AnonymizerEngine()
+
+request_counts = collections.defaultdict(list)
+RATE_LIMIT = 10
 
 INJECTION_PATTERNS = [
     "ignore previous instructions",
@@ -47,10 +52,29 @@ def check_rate_limit(user_id: str) -> bool:
     return True
 
 def run_security_checks(query: str, user_id: str) -> dict:
+    pii = detect_pii(query)
     checks = {
         "injection_detected": detect_injection(query),
         "token_length_valid": validate_token_length(query),
-        "rate_limit_ok": check_rate_limit(user_id)
+        "rate_limit_ok": check_rate_limit(user_id),
+        "pii_detected": pii["pii_detected"],
+        "pii_entities": pii["entities"]
     }
-    checks["passed"] = not checks["injection_detected"] and checks["token_length_valid"] and checks["rate_limit_ok"]
+    checks["passed"] = (
+        not checks["injection_detected"] and
+        checks["token_length_valid"] and
+        checks["rate_limit_ok"]
+    )
     return checks
+
+def detect_pii(text: str) -> dict:
+    results = analyzer.analyze(text=text, language="en")
+    return {
+        "entities": [{"type": r.entity_type, "score": r.score} for r in results],
+        "pii_detected": len(results) > 0
+    }
+
+def anonymize_pii(text: str) -> str:
+    results = analyzer.analyze(text=text, language="en")
+    anonymized_text = anonymizer.anonymize(text=text, analyzer_results=results)
+    return anonymized_text.text
