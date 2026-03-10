@@ -1,0 +1,53 @@
+_wandb:
+    value:
+        cli_version: 0.25.0
+        e:
+            ogn99bbns5vfmy63aifr76e1lpy9imbk:
+                codePath: src\fine_tune_evaluator.py
+                codePathLocal: src\fine_tune_evaluator.py
+                cpu_count: 10
+                cpu_count_logical: 10
+                disk:
+                    /:
+                        total: "509671895040"
+                        used: "161321816064"
+                email: tristangitman@gmail.com
+                executable: C:\Users\trist\OneDrive\Desktop\agentic-application\venv\Scripts\python.exe
+                git:
+                    commit: f29a8098c42591ff34bbe8eaa30cb7be71edcba1
+                    remote: https://github.com/truos-official/governance-demo-agentic.git
+                host: Surface
+                memory:
+                    total: "16760201216"
+                os: Windows-11-10.0.26200-SP0
+                program: C:\Users\trist\OneDrive\Desktop\agentic-application\src\fine_tune_evaluator.py
+                python: CPython 3.13.7
+                root: C:\Users\trist\OneDrive\Desktop\agentic-application
+                startedAt: "2026-03-10T21:27:18.014633Z"
+                writerId: ogn99bbns5vfmy63aifr76e1lpy9imbk
+        m: []
+        python_version: 3.13.7
+        t:
+            "1":
+                - 1
+                - 11
+                - 49
+                - 95
+                - 105
+            "2":
+                - 1
+                - 11
+                - 49
+                - 86
+                - 95
+                - 105
+            "3":
+                - 2
+                - 13
+            "4": 3.13.7
+            "5": 0.25.0
+            "6": 5.2.0
+            "8":
+                - 3
+            "12": 0.25.0
+            "13": windows-arm64

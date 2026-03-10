@@ -2,6 +2,7 @@ import json
 import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+import wandb
 
 load_dotenv()
 
@@ -20,17 +21,29 @@ def evaluate_model(model: str, question: str) -> str:
     return response
 
 if __name__ == "__main__":
+    wandb.init(project="un-governance-demo", name="fine-tune-evaluation")
+    
     print("Starting evaluation...")
     results = []
-    for question in TEST_QUESTIONS:
+    for i, question in enumerate(TEST_QUESTIONS):
         print(f"Evaluating: {question}")
         ft_response = evaluate_model(FINE_TUNED_MODEL, question)
         base_response = evaluate_model(BASE_MODEL, question)
+        
         results.append({
             "question": question,
             "fine_tuned_response": ft_response,
             "base_response": base_response
         })
+        
+        wandb.log({
+            "question_index": i,
+            "question": question,
+            "fine_tuned_response": ft_response,
+            "base_response": base_response
+        })
+    
+    wandb.finish()
     
     print(f"Saving {len(results)} results...")
     with open("evaluation_results.json", "w") as f:
