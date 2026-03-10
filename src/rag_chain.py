@@ -8,7 +8,7 @@ load_dotenv()
 
 
 def build_chain(prompt_type: str = "factual", topic: str = "AI Governance"):
-    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+    llm = ChatOpenAI(model="ft:gpt-4o-mini-2024-07-18:truos::DHxtzUS8", temperature=0)
     prompt = get_prompt(prompt_type)
     
     client=connect()
