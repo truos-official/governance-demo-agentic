@@ -1,13 +1,10 @@
-import json
 import os
-import time
 import redis
+from decimal import Decimal
 from dotenv import load_dotenv
-import requests as http_requests
+from langsmith import Client
 
 load_dotenv()
-
-LANGSMITH_API_URL = "https://api.smith.langchain.com"
 
 def get_redis_client():
     return redis.Redis(
@@ -38,33 +35,30 @@ def track_security_event(event_type: str):
     client.incr(f"security:{event_type}")
 
 def get_langsmith_metrics() -> dict:
-    api_key = os.getenv("LANGCHAIN_API_KEY")
-    project = os.getenv("LANGCHAIN_PROJECT", "un-governance-demo")
-    headers = {"x-api-key": api_key}
-
     try:
-        response = http_requests.get(
-            f"{LANGSMITH_API_URL}/api/v1/runs",
-            headers=headers,
-            params={"project_name": project, "run_type": "llm", "limit": 100}
-        )
-        runs = response.json()
+        client = Client()
+        runs = list(client.list_runs(
+            project_name=os.getenv("LANGCHAIN_PROJECT", "un-governance-demo"),
+            run_type="llm",
+            limit=100
+        ))
 
         if not runs:
-            return {"avg_latency": "—", "total_tokens": 0, "total_cost": "$0.00", "error_rate": "0%", "total_runs": 0}
+            return {"avg_latency": "—", "total_tokens": 0, "total_cost": "$0.00", "error_rate": "0%", "total_llm_runs": 0}
 
-        latencies = []
         total_tokens = 0
-        total_cost = 0.0
+        total_cost = Decimal("0")
         errors = 0
+        latencies = []
 
         for run in runs:
-            if run.get("end_time") and run.get("start_time"):
-                latencies.append(run.get("latency", 0))
-            total_tokens += run.get("total_tokens", 0) or 0
-            total_cost += run.get("total_cost", 0) or 0
-            if run.get("error"):
+            total_tokens += run.total_tokens or 0
+            total_cost += run.total_cost or Decimal("0")
+            if run.status == "error":
                 errors += 1
+            if run.end_time and run.start_time:
+                latency = (run.end_time - run.start_time).total_seconds()
+                latencies.append(latency)
 
         avg_latency = f"{sum(latencies) / len(latencies):.2f}s" if latencies else "—"
         error_rate = f"{(errors / len(runs) * 100):.0f}%" if runs else "0%"
@@ -72,13 +66,13 @@ def get_langsmith_metrics() -> dict:
         return {
             "avg_latency": avg_latency,
             "total_tokens": total_tokens,
-            "total_cost": f"${total_cost:.4f}",
+            "total_cost": f"${float(total_cost):.4f}",
             "error_rate": error_rate,
-            "total_runs": len(runs)
+            "total_llm_runs": len(runs)
         }
     except Exception as e:
         print(f"LangSmith error: {e}")
-        return {"avg_latency": "—", "total_tokens": 0, "total_cost": "$0.00", "error_rate": "—", "total_runs": 0}
+        return {"avg_latency": "—", "total_tokens": 0, "total_cost": "$0.00", "error_rate": "—", "total_llm_runs": 0}
 
 def get_metrics() -> dict:
     client = get_redis_client()
@@ -112,7 +106,7 @@ def get_metrics() -> dict:
         "total_tokens": langsmith["total_tokens"],
         "total_cost": langsmith["total_cost"],
         "error_rate": langsmith["error_rate"],
-        "total_llm_runs": langsmith.get("total_runs", 0)
+        "total_llm_runs": langsmith["total_llm_runs"]
     }
 
 def get_security_events() -> dict:

@@ -48,6 +48,20 @@ function App() {
         {activeTab === 'architecture' && <ArchitectureTab />}
         {activeTab === 'responsible-ai' && <ResponsibleAITab />}
       </main>
+      <footer style={{
+  borderTop: '1px solid var(--border)',
+  background: 'var(--surface)',
+  padding: '1rem 2rem',
+  textAlign: 'center'
+}}>
+  <p style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
+    Built by <a href="https://www.linkedin.com/in/tristangitman" target="_blank" rel="noreferrer"
+      style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: '500' }}>Tristan Gitman</a>
+    {' '}— Head of AI Governance, UN Secretariat OICT &nbsp;·&nbsp; 
+    <a href="https://github.com/truos-official/governance-demo-agentic" target="_blank" rel="noreferrer"
+      style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: '500' }}>View on GitHub</a>
+  </p>
+</footer>
     </div>
   );
 }

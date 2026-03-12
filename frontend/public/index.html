@@ -4,40 +4,57 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    <meta
-      name="description"
-      content="Web site created using create-react-app"
-    />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
+    <meta name="theme-color" content="#1a73e8" />
 
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-    <title>React App</title>
+    <!-- Primary SEO -->
+    <title>Agentic AI: Responsible AI Demo — Tristan Gitman | UN OICT</title>
+    <meta name="description" content="A responsible AI governance assistant built on publicly available UN policy documents. Developed by Tristan Gitman, Head of AI Governance at the UN Secretariat Office of Information and Communications Technology (OICT). Features fine-tuned GPT-4o-mini, hybrid RAG, hallucination detection, and enterprise security." />
+    <meta name="keywords" content="Tristan Gitman, UN AI Governance, Responsible AI, OICT, United Nations AI Policy, RAG, GPT-4o-mini, AI Safety, Agentic AI" />
+    <meta name="author" content="Tristan Gitman" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph (LinkedIn, Facebook, Slack previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Agentic AI: Responsible AI Demo — Tristan Gitman | UN OICT" />
+    <meta property="og:description" content="Responsible AI governance assistant built on 9 UN policy documents. Fine-tuned LLM, hybrid RAG search, hallucination detection, PII anonymization, and real-time analytics. Built by Tristan Gitman at the UN Secretariat." />
+    <meta property="og:url" content="https://governance-demo.azurestaticapps.net" />
+    <meta property="og:site_name" content="UN AI Governance Demo" />
+    <meta property="og:image" content="%PUBLIC_URL%/og-image.png" />
+
+    <!-- Twitter/X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Agentic AI: Responsible AI Demo — Tristan Gitman | UN OICT" />
+    <meta name="twitter:description" content="Responsible AI governance assistant built on UN policy documents. Fine-tuned LLM, hybrid RAG, hallucination detection. Built by Tristan Gitman at the UN Secretariat OICT." />
+    <meta name="twitter:image" content="%PUBLIC_URL%/og-image.png" />
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Agentic AI: Responsible AI Demo",
+      "description": "A responsible AI governance assistant built on UN policy documents, featuring fine-tuned GPT-4o-mini, hybrid RAG search, hallucination detection, and enterprise-grade security controls.",
+      "url": "https://governance-demo.azurestaticapps.net",
+      "applicationCategory": "AIApplication",
+      "author": {
+        "@type": "Person",
+        "name": "Tristan Gitman",
+        "jobTitle": "Head of AI Governance",
+        "worksFor": {
+          "@type": "Organization",
+          "name": "United Nations Secretariat — Office of Information and Communications Technology",
+          "url": "https://www.un.org/en/doit/oict"
+        }
+      },
+      "keywords": "AI Governance, Responsible AI, United Nations, RAG, Fine-tuning, Hallucination Detection, PII Anonymization"
+    }
+    </script>
+
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-    <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
-
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
-
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
   </body>
 </html>
