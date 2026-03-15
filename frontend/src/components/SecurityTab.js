@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = process.env.REACT_APP_API_URL;
 
 const controls = [
   { name: 'Prompt Injection Detection', desc: 'Pattern-based detection of adversarial inputs — 8 patterns screened per query', source: 'security.py' },

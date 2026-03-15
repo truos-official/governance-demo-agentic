@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = process.env.REACT_APP_API_URL;
 
 export default function QueryTab() {
   const [query, setQuery] = useState('');
@@ -67,7 +67,6 @@ export default function QueryTab() {
           <div className="card">
             <div className="card-title">Governance Panel</div>
             <div className="grid-3">
-
               <div>
                 <p className="kpi-label" style={{ marginBottom: '0.75rem' }}>⚠️ Hallucination Check</p>
                 <span className={`badge ${result.hallucination_score.is_hallucination ? 'badge-red' : 'badge-green'}`}>
@@ -115,7 +114,6 @@ export default function QueryTab() {
                   </div>
                 ))}
               </div>
-
             </div>
           </div>
         </>

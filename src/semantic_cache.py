@@ -3,14 +3,14 @@ import os
 import numpy as np
 import redis
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
 SIMILARITY_THRESHOLD = 0.95
-CACHE_TTL = 3600  # 1 hour
+CACHE_TTL = 3600
 
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 def get_redis_client():
     return redis.Redis(
@@ -28,14 +28,11 @@ def cosine_similarity(a: list, b: list) -> float:
 def get_cached_response(query: str, prompt_type: str = "factual", topic: str = "AI Governance") -> str | None:
     client = get_redis_client()
     query_vector = embeddings.embed_query(query)
-    
     for key in client.scan_iter("cache:*"):
         cached = json.loads(client.get(key))
         if cached.get("prompt_type") != prompt_type or cached.get("topic") != topic:
             continue
-        similarity = cosine_similarity(query_vector, cached["vector"])
-        if similarity >= SIMILARITY_THRESHOLD:
-            print(f"Cache hit — similarity: {similarity:.3f}")
+        if cosine_similarity(query_vector, cached["vector"]) >= SIMILARITY_THRESHOLD:
             return cached["answer"]
     return None
 
@@ -50,4 +47,3 @@ def store_in_cache(query: str, answer: str, prompt_type: str = "factual", topic:
         "topic": topic,
         "vector": query_vector
     }))
-    print(f"Stored in cache: {key}")

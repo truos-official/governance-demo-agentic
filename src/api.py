@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from src.rag_chain import build_chain
-from src.topic_classifier import detect_style
+from src.query_classifier import classify_query
 from src.security import run_security_checks, anonymize_pii
 from src.hallucination_detector import detect_hallucination
 from src.metrics_tracker import track_query, track_security_event, get_metrics, get_security_events
@@ -28,19 +28,6 @@ Document sources: A/80/78, A/RES/78/265, E/C.16/2025/4, A/79/L.94, A/79/966, CEB
 You cover AI policy, human rights, military AI, biodiversity, sustainable development, and public sector AI governance.
 You auto-detect query intent, anonymize PII, detect hallucinations, and refuse adversarial queries.
 You supplement UN document knowledge with general knowledge on AI governance and UN/EU policy when needed."""
-
-def is_meta_question(query: str) -> bool:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    prompt = f"""Does this query EXPLICITLY ask about THIS AI assistant itself — its identity, creation, capabilities, or how it works as a system?
-
-Answer YES only if the user is directly asking about this AI tool — not about AI in general, not about AI governance, not about external systems.
-
-Examples of YES: "what are you", "what can you do", "who built you", "when were you created", "what are your capabilities", "how do you work", "what is this tool"
-Examples of NO: "what are AI governance principles", "what are sources of AI knowledge in the UN", "how does AI work in military contexts", "what risks does AI pose"
-
-Answer only YES or NO.
-Query: {query}"""
-    return llm.invoke(prompt).content.strip().upper() == "YES"
 
 def answer_meta_question(query: str) -> str:
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -65,7 +52,13 @@ class QueryResponse(BaseModel):
 
 @app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
-    if is_meta_question(request.question):
+    start_time = time.time()
+
+    # Single LLM call replaces is_meta_question + detect_injection + detect_style
+    classification = classify_query(request.question)
+
+    # Handle meta questions
+    if classification["is_meta"]:
         return QueryResponse(
             answer=answer_meta_question(request.question),
             hallucination_score={"is_hallucination": False, "confidence": 1.0, "reason": "System capability response"},
@@ -73,8 +66,8 @@ def query(request: QueryRequest):
             sources=[]
         )
 
-    start_time = time.time()
-    security = run_security_checks(request.question, request.user_id)
+    # Run security checks — injection already detected by classifier
+    security = run_security_checks(request.question, request.user_id, classification["is_injection"])
 
     if not security["passed"]:
         if security["injection_detected"]:
@@ -87,7 +80,7 @@ def query(request: QueryRequest):
         track_security_event("pii")
 
     clean_query = anonymize_pii(request.question)
-    prompt_type = detect_style(clean_query)
+    prompt_type = classification["style"]
     chain = build_chain(prompt_type=prompt_type, topic="AI Governance")
     result = chain(clean_query)
 
