@@ -1,5 +1,6 @@
 import time
 from pydantic import BaseModel
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
@@ -8,7 +9,10 @@ from src.rag_chain import build_chain
 from src.query_classifier import classify_query
 from src.security import run_security_checks, anonymize_pii
 from src.hallucination_detector import detect_hallucination
-from src.metrics_tracker import track_query, track_security_event, get_metrics, get_security_events
+from src.metrics_tracker import (
+    track_query, track_security_event, get_metrics, get_security_events,
+    get_redis_client, track_user_query, get_user_metrics
+)
 
 load_dotenv()
 
@@ -50,14 +54,20 @@ class QueryResponse(BaseModel):
     detected_style: str
     sources: list
 
+class RegisterRequest(BaseModel):
+    user_id: str
+    provider: str
+    full_name: str
+    email: str
+    title: str
+    company: str
+    country: str
+
 @app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
     start_time = time.time()
-
-    # Single LLM call replaces is_meta_question + detect_injection + detect_style
     classification = classify_query(request.question)
 
-    # Handle meta questions
     if classification["is_meta"]:
         return QueryResponse(
             answer=answer_meta_question(request.question),
@@ -66,7 +76,6 @@ def query(request: QueryRequest):
             sources=[]
         )
 
-    # Run security checks — injection already detected by classifier
     security = run_security_checks(request.question, request.user_id, classification["is_injection"])
 
     if not security["passed"]:
@@ -100,6 +109,13 @@ def query(request: QueryRequest):
         latency=latency
     )
 
+    track_user_query(
+        user_id=request.user_id,
+        style=prompt_type,
+        is_hallucination=hallucination["is_hallucination"],
+        latency=latency
+    )
+
     return QueryResponse(
         answer=result["answer"],
         hallucination_score=hallucination,
@@ -114,3 +130,68 @@ def metrics():
 @app.get("/security-events")
 def security_events():
     return get_security_events()
+
+@app.post("/clear-cache")
+def clear_cache():
+    client = get_redis_client()
+    deleted = 0
+    for key in client.scan_iter("cache:*"):
+        client.delete(key)
+        deleted += 1
+    return {"cleared": deleted, "message": f"Cleared {deleted} cache entries"}
+
+@app.post("/reset-metrics")
+def reset_metrics():
+    client = get_redis_client()
+    deleted = 0
+    for key in client.scan_iter("metrics:*"):
+        client.delete(key)
+        deleted += 1
+    for key in client.scan_iter("security:*"):
+        client.delete(key)
+        deleted += 1
+    return {"cleared": deleted, "message": f"Reset {deleted} metric keys"}
+
+@app.post("/register")
+def register(request: RegisterRequest):
+    import json
+    from datetime import datetime
+    client = get_redis_client()
+    profile = {
+        "user_id": request.user_id,
+        "provider": request.provider,
+        "full_name": request.full_name,
+        "email": request.email,
+        "title": request.title,
+        "company": request.company,
+        "country": request.country,
+        "registered_at": datetime.utcnow().isoformat(),
+        "last_active": datetime.utcnow().isoformat()
+    }
+    client.set(f"user:{request.user_id}:profile", json.dumps(profile))
+    client.sadd("users:all", request.user_id)
+    return {"status": "registered", "profile": profile}
+
+@app.get("/user-profile/{user_id}")
+def get_user_profile(user_id: str):
+    import json
+    client = get_redis_client()
+    raw = client.get(f"user:{user_id}:profile")
+    if not raw:
+        return {"profile": None}
+    return {"profile": json.loads(raw)}
+
+@app.get("/users")
+def get_all_users():
+    import json
+    from datetime import datetime
+    client = get_redis_client()
+    user_ids = client.smembers("users:all")
+    users = []
+    for uid in user_ids:
+        raw = client.get(f"user:{uid}:profile")
+        if raw:
+            profile = json.loads(raw)
+            user_metrics = get_user_metrics(uid)
+            users.append({**profile, **user_metrics})
+    return {"users": users, "total": len(users)}

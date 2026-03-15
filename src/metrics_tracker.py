@@ -1,6 +1,8 @@
 import os
+import json
 import redis
 from decimal import Decimal
+from datetime import datetime
 from dotenv import load_dotenv
 from langsmith import Client
 from elasticsearch import Elasticsearch
@@ -39,6 +41,63 @@ def track_pii_entity(entity_type: str):
     client = get_redis_client()
     client.incr(f"metrics:pii_entity:{entity_type}")
 
+def track_user_query(user_id: str, style: str, is_hallucination: bool, latency: float):
+    if not user_id or user_id in ("anonymous", "dev_user", "eval_run", "demo_user"):
+        return
+    client = get_redis_client()
+    client.incr(f"user:{user_id}:total_queries")
+    client.incr(f"user:{user_id}:style:{style}")
+    if is_hallucination:
+        client.incr(f"user:{user_id}:hallucinations")
+    client.lpush(f"user:{user_id}:latencies", latency)
+    client.ltrim(f"user:{user_id}:latencies", 0, 99)
+    client.set(f"user:{user_id}:last_active", datetime.utcnow().isoformat())
+
+def get_user_metrics(user_id: str) -> dict:
+    try:
+        client = get_redis_client()
+        total = int(client.get(f"user:{user_id}:total_queries") or 0)
+        hallucinations = int(client.get(f"user:{user_id}:hallucinations") or 0)
+        last_active = client.get(f"user:{user_id}:last_active") or "—"
+
+        style_distribution = {}
+        for style in ["factual", "analytical", "summary", "safety", "adversarial"]:
+            count = int(client.get(f"user:{user_id}:style:{style}") or 0)
+            if count > 0:
+                style_distribution[style] = count
+
+        raw_latencies = client.lrange(f"user:{user_id}:latencies", 0, -1)
+        latencies = sorted([float(x) for x in raw_latencies]) if raw_latencies else []
+        avg_latency = f"{sum(latencies) / len(latencies):.1f}s" if latencies else "—"
+
+        return {
+            "total_queries": total,
+            "hallucination_rate": f"{(hallucinations / total * 100):.0f}%" if total > 0 else "0%",
+            "avg_latency": avg_latency,
+            "style_distribution": style_distribution,
+            "last_active": last_active[:10] if last_active != "—" else "—"
+        }
+    except Exception as e:
+        print(f"User metrics error: {e}")
+        return {"total_queries": 0, "hallucination_rate": "0%", "avg_latency": "—", "style_distribution": {}, "last_active": "—"}
+
+def get_all_user_activity() -> list:
+    try:
+        client = get_redis_client()
+        user_ids = client.smembers("users:all")
+        users = []
+        for uid in user_ids:
+            raw = client.get(f"user:{uid}:profile")
+            if raw:
+                profile = json.loads(raw)
+                metrics = get_user_metrics(uid)
+                users.append({**profile, **metrics})
+        users.sort(key=lambda x: x.get("total_queries", 0), reverse=True)
+        return users
+    except Exception as e:
+        print(f"User activity error: {e}")
+        return []
+
 def get_redis_infrastructure_metrics() -> dict:
     try:
         client = get_redis_client()
@@ -68,7 +127,6 @@ def get_latency_percentiles() -> dict:
         if not raw:
             return {"p50": "—", "p95": "—", "p99": "—", "min": "—", "max": "—"}
         latencies = sorted([float(x) for x in raw])
-        n = len(latencies)
         def percentile(data, p):
             idx = int(len(data) * p / 100)
             return f"{data[min(idx, len(data)-1)]:.2f}s"
@@ -78,7 +136,7 @@ def get_latency_percentiles() -> dict:
             "p99": percentile(latencies, 99),
             "min": f"{latencies[0]:.2f}s",
             "max": f"{latencies[-1]:.2f}s",
-            "sample_size": n
+            "sample_size": len(latencies)
         }
     except Exception as e:
         print(f"Latency percentile error: {e}")
@@ -159,19 +217,10 @@ def get_elasticsearch_metrics() -> dict:
             request_timeout=10
         )
         count = client.count(index="un_documents_index")
-        mapping = client.indices.get_mapping(index="un_documents_index")
-        fields = mapping["un_documents_index"]["mappings"]["properties"].keys()
-        return {
-            "document_count": count["count"],
-            "index_size": "Serverless",
-            "avg_search_time": "Serverless",
-            "total_searches": "Serverless",
-            "total_indexing_ops": "Serverless",
-            "fields": list(fields)
-        }
+        return {"document_count": count["count"]}
     except Exception as e:
         print(f"Elasticsearch metrics error: {e}")
-        return {}
+        return {"document_count": "—"}
 
 def get_pii_entity_breakdown() -> dict:
     try:
@@ -209,9 +258,9 @@ def get_metrics() -> dict:
     redis_infra = get_redis_infrastructure_metrics()
     es_metrics = get_elasticsearch_metrics()
     pii_entities = get_pii_entity_breakdown()
+    user_activity = get_all_user_activity()
 
     return {
-        # Application — Redis
         "total_queries": total,
         "cache_hit_rate": f"{(cache_hits / total * 100):.0f}%" if total > 0 else "0%",
         "hallucination_rate": f"{(hallucinations / total * 100):.0f}%" if total > 0 else "0%",
@@ -219,15 +268,11 @@ def get_metrics() -> dict:
         "security_block_rate": f"{(injection_attempts / total * 100):.0f}%" if total > 0 else "0%",
         "style_distribution": style_distribution,
         "top_sources": top_sources,
-
-        # Latency percentiles — Redis
         "latency_p50": latency_percentiles.get("p50", "—"),
         "latency_p95": latency_percentiles.get("p95", "—"),
         "latency_p99": latency_percentiles.get("p99", "—"),
         "latency_min": latency_percentiles.get("min", "—"),
         "latency_max": latency_percentiles.get("max", "—"),
-
-        # LLM — LangSmith
         "avg_latency": langsmith["avg_latency"],
         "p95_latency": langsmith["p95_latency"],
         "total_tokens": langsmith["total_tokens"],
@@ -238,24 +283,16 @@ def get_metrics() -> dict:
         "error_rate": langsmith["error_rate"],
         "total_llm_runs": langsmith["total_llm_runs"],
         "model_distribution": langsmith["model_distribution"],
-
-        # Elasticsearch
         "es_document_count": es_metrics.get("document_count", "—"),
-        "es_index_size": es_metrics.get("index_size", "—"),
-        "es_total_searches": es_metrics.get("total_searches", "—"),
-        "es_avg_search_time": es_metrics.get("avg_search_time", "—"),
-        "es_total_indexing_ops": es_metrics.get("total_indexing_ops", "—"),
-
-        # Redis infrastructure
         "redis_memory_used": redis_infra.get("memory_used", "—"),
         "redis_memory_peak": redis_infra.get("memory_peak", "—"),
         "redis_connected_clients": redis_infra.get("connected_clients", "—"),
         "redis_keyspace_hit_ratio": redis_infra.get("keyspace_hit_ratio", "—"),
         "redis_total_keys": redis_infra.get("total_keys", "—"),
         "redis_uptime_days": redis_infra.get("uptime_days", "—"),
-
-        # PII entity breakdown
         "pii_entity_breakdown": pii_entities,
+        "user_activity": user_activity,
+        "total_registered_users": len(user_activity),
     }
 
 def get_security_events() -> dict:

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import AuthGate from './components/AuthGate';
 import QueryTab from './components/QueryTab';
 import AnalyticsTab from './components/AnalyticsTab';
 import SecurityTab from './components/SecurityTab';
@@ -7,7 +8,7 @@ import ResponsibleAITab from './components/ResponsibleAITab';
 import EvalTab from './components/EvalTab';
 import './App.css';
 
-function App() {
+function AppContent({ user, profile }) {
   const [activeTab, setActiveTab] = useState('query');
 
   const tabs = [
@@ -19,17 +20,47 @@ function App() {
     { id: 'evals', label: '🧪 Evals' },
   ];
 
+  const handleLogout = () => {
+    window.location.href = '/.auth/logout';
+  };
+
   return (
     <div className="app">
-      <header className="header">
-        <div className="header-content">
+      <header className="header" style={{ padding: 0 }}>
+        {/* Top row — branding + user */}
+        <div style={{
+          padding: '0 2rem',
+          borderBottom: '1px solid var(--surface-3)',
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', height: '52px',
+          maxWidth: '100%'
+        }}>
           <div className="header-title">
-            <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '40px', width: 'auto' }} />
+            <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '34px', width: 'auto' }} />
             <div>
-              <h1>AI Governance</h1>
-              <p>Office of Information and Communication Technologies</p>
+              <h1>Responsible AI</h1>
+              <p>Demo</p>
             </div>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ fontSize: '0.78rem', fontWeight: '500', color: 'var(--text-primary)' }}>
+                {profile?.full_name || user?.name || 'User'}
+              </p>
+              <p style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)' }}>
+                {profile?.title || user?.email || ''}
+              </p>
+            </div>
+            <button onClick={handleLogout} style={{
+              background: 'none', border: '1px solid var(--border)', borderRadius: '6px',
+              padding: '0.35rem 0.75rem', fontSize: '0.75rem', cursor: 'pointer',
+              color: 'var(--text-secondary)', fontFamily: 'inherit', whiteSpace: 'nowrap'
+            }}>Sign out</button>
+          </div>
+        </div>
+
+        {/* Bottom row — tabs */}
+        <div style={{ padding: '0 2rem' }}>
           <nav className="tabs">
             {tabs.map(tab => (
               <button
@@ -43,14 +74,16 @@ function App() {
           </nav>
         </div>
       </header>
+
       <main className="main">
-        {activeTab === 'query' && <QueryTab />}
+        {activeTab === 'query' && <QueryTab user={user} profile={profile} />}
         {activeTab === 'analytics' && <AnalyticsTab />}
         {activeTab === 'security' && <SecurityTab />}
         {activeTab === 'architecture' && <ArchitectureTab />}
         {activeTab === 'responsible-ai' && <ResponsibleAITab />}
         {activeTab === 'evals' && <EvalTab />}
       </main>
+
       <footer style={{
         borderTop: '1px solid var(--border)',
         background: 'var(--surface)',
@@ -60,7 +93,7 @@ function App() {
         <p style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
           Built by <a href="https://www.linkedin.com/in/tristangitman" target="_blank" rel="noreferrer"
             style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: '500' }}>Tristan Gitman</a>
-          {' '} UN Secretariat OICT &nbsp;·&nbsp;
+          {' '}UN Secretariat OICT &nbsp;·&nbsp;
           <a href="https://github.com/truos-official/governance-demo-agentic" target="_blank" rel="noreferrer"
             style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: '500' }}>View on GitHub</a>
         </p>
@@ -69,4 +102,10 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <AuthGate>
+      {({ user, profile }) => <AppContent user={user} profile={profile} />}
+    </AuthGate>
+  );
+}
