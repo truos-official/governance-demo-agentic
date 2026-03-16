@@ -1,4 +1,7 @@
+import json
+import os
 import time
+from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 from fastapi import FastAPI, HTTPException
@@ -18,9 +21,12 @@ load_dotenv()
 
 app = FastAPI()
 
+allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -100,21 +106,23 @@ def query(request: QueryRequest):
     )
 
     latency = time.time() - start_time
-    track_query(
-        style=prompt_type,
-        sources=result.get("sources", []),
-        is_hallucination=hallucination["is_hallucination"],
-        cache_hit=result.get("cache_hit", False),
-        pii_detected=security["pii_detected"],
-        latency=latency
-    )
-
-    track_user_query(
-        user_id=request.user_id,
-        style=prompt_type,
-        is_hallucination=hallucination["is_hallucination"],
-        latency=latency
-    )
+    try:
+        track_query(
+            style=prompt_type,
+            sources=result.get("sources", []),
+            is_hallucination=hallucination["is_hallucination"],
+            cache_hit=result.get("cache_hit", False),
+            pii_detected=security["pii_detected"],
+            latency=latency
+        )
+        track_user_query(
+            user_id=request.user_id,
+            style=prompt_type,
+            is_hallucination=hallucination["is_hallucination"],
+            latency=latency
+        )
+    except Exception as e:
+        print(f"Metrics tracking error (non-fatal): {e}")
 
     return QueryResponse(
         answer=result["answer"],
@@ -133,48 +141,68 @@ def security_events():
 
 @app.post("/clear-cache")
 def clear_cache():
-    client = get_redis_client()
-    deleted = 0
-    for key in client.scan_iter("cache:*"):
-        client.delete(key)
-        deleted += 1
-    return {"cleared": deleted, "message": f"Cleared {deleted} cache entries"}
+    try:
+        client = get_redis_client()
+        deleted = 0
+        for key in client.scan_iter("cache:*"):
+            client.delete(key)
+            deleted += 1
+        return {"cleared": deleted, "message": f"Cleared {deleted} cache entries"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cache clear failed: {str(e)}")
 
 @app.post("/reset-metrics")
 def reset_metrics():
-    client = get_redis_client()
-    deleted = 0
-    for key in client.scan_iter("metrics:*"):
-        client.delete(key)
-        deleted += 1
-    for key in client.scan_iter("security:*"):
-        client.delete(key)
-        deleted += 1
-    return {"cleared": deleted, "message": f"Reset {deleted} metric keys"}
+    try:
+        client = get_redis_client()
+        deleted = 0
+        for key in client.scan_iter("metrics:*"):
+            client.delete(key)
+            deleted += 1
+        for key in client.scan_iter("security:*"):
+            client.delete(key)
+            deleted += 1
+        return {"cleared": deleted, "message": f"Reset {deleted} metric keys"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Metrics reset failed: {str(e)}")
 
 @app.post("/register")
 def register(request: RegisterRequest):
-    import json
-    from datetime import datetime
-    client = get_redis_client()
-    profile = {
-        "user_id": request.user_id,
-        "provider": request.provider,
-        "full_name": request.full_name,
-        "email": request.email,
-        "title": request.title,
-        "company": request.company,
-        "country": request.country,
-        "registered_at": datetime.utcnow().isoformat(),
-        "last_active": datetime.utcnow().isoformat()
-    }
-    client.set(f"user:{request.user_id}:profile", json.dumps(profile))
-    client.sadd("users:all", request.user_id)
-    return {"status": "registered", "profile": profile}
+    try:
+        client = get_redis_client()
+        profile = {
+            "user_id": request.user_id,
+            "provider": request.provider,
+            "full_name": request.full_name,
+            "email": request.email,
+            "title": request.title,
+            "company": request.company,
+            "country": request.country,
+            "registered_at": datetime.utcnow().isoformat(),
+            "last_active": datetime.utcnow().isoformat()
+        }
+        client.set(f"user:{request.user_id}:profile", json.dumps(profile))
+        client.sadd("users:all", request.user_id)
+        return {"status": "registered", "profile": profile}
+    except Exception as e:
+        print(f"Registration error: {e}")
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+@app.get("/health")
+def health():
+    """Health check endpoint for Azure Container Apps."""
+    checks = {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    try:
+        client = get_redis_client()
+        client.ping()
+        checks["redis"] = "connected"
+    except Exception as e:
+        checks["redis"] = f"error: {str(e)}"
+        checks["status"] = "degraded"
+    return checks
 
 @app.get("/user-profile/{user_id}")
 def get_user_profile(user_id: str):
-    import json
     client = get_redis_client()
     raw = client.get(f"user:{user_id}:profile")
     if not raw:
@@ -183,8 +211,6 @@ def get_user_profile(user_id: str):
 
 @app.get("/users")
 def get_all_users():
-    import json
-    from datetime import datetime
     client = get_redis_client()
     user_ids = client.smembers("users:all")
     users = []

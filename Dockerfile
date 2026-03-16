@@ -12,7 +12,6 @@ RUN pip install --no-cache-dir -r requirements.prod.txt
 
 COPY src/ ./src/
 COPY data/ ./data/
-COPY .env .
 
 EXPOSE 8000
 

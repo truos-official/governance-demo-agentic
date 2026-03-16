@@ -1,6 +1,7 @@
 import os
 import json
 import redis
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from decimal import Decimal
 from datetime import datetime
 from dotenv import load_dotenv
@@ -9,13 +10,18 @@ from elasticsearch import Elasticsearch
 
 load_dotenv()
 
+REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
+REDIS_SOCKET_CONNECT_TIMEOUT = int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 5))
+
 def get_redis_client():
     return redis.Redis(
         host=os.getenv("REDIS_HOST"),
         port=int(os.getenv("REDIS_PORT", 6379)),
         password=os.getenv("REDIS_PASSWORD"),
-        ssl=False,
-        decode_responses=True
+        ssl=os.getenv("REDIS_SSL", "false").lower() == "true",
+        decode_responses=True,
+        socket_timeout=REDIS_SOCKET_TIMEOUT,
+        socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT,
     )
 
 def track_query(style: str, sources: list, is_hallucination: bool, cache_hit: bool, pii_detected: bool, latency: float):
@@ -144,7 +150,7 @@ def get_latency_percentiles() -> dict:
 
 def get_langsmith_metrics() -> dict:
     try:
-        client = Client()
+        client = Client(timeout_ms=10000)
         runs = list(client.list_runs(
             project_name=os.getenv("LANGCHAIN_PROJECT", "un-governance-demo"),
             run_type="llm",
@@ -234,31 +240,78 @@ def get_pii_entity_breakdown() -> dict:
         print(f"PII entity breakdown error: {e}")
         return {}
 
+LANGSMITH_FALLBACK = {
+    "avg_latency": "—", "total_tokens": 0, "total_cost": "$0.00",
+    "error_rate": "—", "total_llm_runs": 0,
+    "prompt_tokens": 0, "completion_tokens": 0,
+    "cost_per_query": "$0.00", "p95_latency": "—",
+    "model_distribution": {}
+}
+
 def get_metrics() -> dict:
-    client = get_redis_client()
-    total = int(client.get("metrics:total_queries") or 0)
-    cache_hits = int(client.get("metrics:cache_hits") or 0)
-    hallucinations = int(client.get("metrics:hallucinations") or 0)
-    pii_detected = int(client.get("metrics:pii_detected") or 0)
-    injection_attempts = int(client.get("security:injection") or 0)
+    # Fetch Redis-based metrics first (fast)
+    try:
+        client = get_redis_client()
+        total = int(client.get("metrics:total_queries") or 0)
+        cache_hits = int(client.get("metrics:cache_hits") or 0)
+        hallucinations = int(client.get("metrics:hallucinations") or 0)
+        pii_detected = int(client.get("metrics:pii_detected") or 0)
+        injection_attempts = int(client.get("security:injection") or 0)
 
-    style_distribution = {}
-    for style in ["factual", "analytical", "summary", "safety", "adversarial"]:
-        count = int(client.get(f"metrics:style:{style}") or 0)
-        if count > 0:
-            style_distribution[style] = count
+        style_distribution = {}
+        for style in ["factual", "analytical", "summary", "safety", "adversarial"]:
+            count = int(client.get(f"metrics:style:{style}") or 0)
+            if count > 0:
+                style_distribution[style] = count
 
-    top_sources = {}
-    for key in client.scan_iter("metrics:source:*"):
-        source = key.replace("metrics:source:", "")
-        top_sources[source] = int(client.get(key) or 0)
+        top_sources = {}
+        for key in client.scan_iter("metrics:source:*"):
+            source = key.replace("metrics:source:", "")
+            top_sources[source] = int(client.get(key) or 0)
+    except Exception as e:
+        print(f"Redis metrics error: {e}")
+        total = cache_hits = hallucinations = pii_detected = injection_attempts = 0
+        style_distribution = {}
+        top_sources = {}
 
-    langsmith = get_langsmith_metrics()
-    latency_percentiles = get_latency_percentiles()
-    redis_infra = get_redis_infrastructure_metrics()
-    es_metrics = get_elasticsearch_metrics()
-    pii_entities = get_pii_entity_breakdown()
-    user_activity = get_all_user_activity()
+    # Fetch external metrics concurrently with a timeout
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        langsmith_future = executor.submit(get_langsmith_metrics)
+        latency_future = executor.submit(get_latency_percentiles)
+        redis_infra_future = executor.submit(get_redis_infrastructure_metrics)
+        es_future = executor.submit(get_elasticsearch_metrics)
+        pii_future = executor.submit(get_pii_entity_breakdown)
+        user_future = executor.submit(get_all_user_activity)
+
+    try:
+        langsmith = langsmith_future.result(timeout=15)
+    except Exception:
+        langsmith = LANGSMITH_FALLBACK
+
+    try:
+        latency_percentiles = latency_future.result(timeout=10)
+    except Exception:
+        latency_percentiles = {"p50": "—", "p95": "—", "p99": "—", "min": "—", "max": "—"}
+
+    try:
+        redis_infra = redis_infra_future.result(timeout=10)
+    except Exception:
+        redis_infra = {}
+
+    try:
+        es_metrics = es_future.result(timeout=10)
+    except Exception:
+        es_metrics = {"document_count": "—"}
+
+    try:
+        pii_entities = pii_future.result(timeout=10)
+    except Exception:
+        pii_entities = {}
+
+    try:
+        user_activity = user_future.result(timeout=10)
+    except Exception:
+        user_activity = []
 
     return {
         "total_queries": total,
