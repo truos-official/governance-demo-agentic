@@ -17,18 +17,11 @@ REDIS_SOCKET_CONNECT_TIMEOUT = int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 5))
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 def get_redis_client():
-    ssl_context = None
-    if REDIS_SSL:
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-
     return redis.Redis(
         host=os.getenv("REDIS_HOST"),
         port=int(os.getenv("REDIS_PORT", 11423)),
         password=os.getenv("REDIS_PASSWORD"),
         ssl=REDIS_SSL,
-        ssl_context=ssl_context if REDIS_SSL else None,
         decode_responses=True,
         socket_timeout=REDIS_SOCKET_TIMEOUT,
         socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT
