@@ -18,7 +18,7 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 def get_redis_client():
     kwargs = {
         "host": os.getenv("REDIS_HOST"),
-        "port": int(os.getenv("REDIS_PORT", 6380)),
+        "port": int(os.getenv("REDIS_PORT", 11423)),
         "password": os.getenv("REDIS_PASSWORD"),
         "decode_responses": True,
         "socket_timeout": REDIS_SOCKET_TIMEOUT,
@@ -28,6 +28,15 @@ def get_redis_client():
         kwargs["ssl"] = True
         kwargs["ssl_cert_reqs"] = "none"
     return redis.Redis(**kwargs)
+    return redis.Redis(
+        host=os.getenv("REDIS_HOST"),
+        port=int(os.getenv("REDIS_PORT", 11423)),
+        password=os.getenv("REDIS_PASSWORD"),
+        ssl=REDIS_SSL,
+        decode_responses=True,
+        socket_timeout=REDIS_SOCKET_TIMEOUT,
+        socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT
+    )
 
 def cosine_similarity(a: list, b: list) -> float:
     a, b = np.array(a), np.array(b)
