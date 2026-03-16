@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Access Denied</title>
+  <style>
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: #f8f9fa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      border: 1px solid #dadce0;
+      padding: 3rem;
+      max-width: 480px;
+      text-align: center;
+      box-shadow: 0 4px 8px rgba(60,64,67,0.15);
+    }
+    img { height: 52px; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.3rem; color: #202124; margin-bottom: 0.75rem; }
+    p { font-size: 0.9rem; color: #5f6368; line-height: 1.6; margin-bottom: 1.5rem; }
+    a {
+      display: inline-block;
+      background: #1a73e8;
+      color: white;
+      padding: 0.65rem 1.5rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="/un-emblem.png" alt="UN Emblem" />
+    <h1>Access Restricted</h1>
+    <p>
+      This application is restricted to approved users only.<br/>
+      If you believe you should have access, please contact the system administrator.
+    </p>
+    <a href="/.auth/logout">Sign out</a>
+  </div>
+</body>
+</html>

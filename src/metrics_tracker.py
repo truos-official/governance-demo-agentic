@@ -1,21 +1,36 @@
 import os
 import json
 import redis
+import ssl
 from decimal import Decimal
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from langsmith import Client
 from elasticsearch import Elasticsearch
 
 load_dotenv()
 
+REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
+REDIS_SOCKET_CONNECT_TIMEOUT = int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 5))
+REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
+
 def get_redis_client():
+    ssl_context = None
+    if REDIS_SSL:
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
     return redis.Redis(
         host=os.getenv("REDIS_HOST"),
-        port=int(os.getenv("REDIS_PORT", 6379)),
+        port=int(os.getenv("REDIS_PORT", 11423)),
         password=os.getenv("REDIS_PASSWORD"),
-        ssl=False,
-        decode_responses=True
+        ssl=REDIS_SSL,
+        ssl_context=ssl_context if REDIS_SSL else None,
+        decode_responses=True,
+        socket_timeout=REDIS_SOCKET_TIMEOUT,
+        socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT
     )
 
 def track_query(style: str, sources: list, is_hallucination: bool, cache_hit: bool, pii_detected: bool, latency: float):
@@ -44,6 +59,9 @@ def track_pii_entity(entity_type: str):
 def track_user_query(user_id: str, style: str, is_hallucination: bool, latency: float):
     if not user_id or user_id in ("anonymous", "dev_user", "eval_run", "demo_user"):
         return
+    import logging
+    logger = logging.getLogger("uvicorn")
+    logger.info(f"USER_QUERY: user_id={user_id} style={style} hallucination={is_hallucination} latency={latency:.2f}s")
     client = get_redis_client()
     client.incr(f"user:{user_id}:total_queries")
     client.incr(f"user:{user_id}:style:{style}")
@@ -59,17 +77,14 @@ def get_user_metrics(user_id: str) -> dict:
         total = int(client.get(f"user:{user_id}:total_queries") or 0)
         hallucinations = int(client.get(f"user:{user_id}:hallucinations") or 0)
         last_active = client.get(f"user:{user_id}:last_active") or "—"
-
         style_distribution = {}
         for style in ["factual", "analytical", "summary", "safety", "adversarial"]:
             count = int(client.get(f"user:{user_id}:style:{style}") or 0)
             if count > 0:
                 style_distribution[style] = count
-
         raw_latencies = client.lrange(f"user:{user_id}:latencies", 0, -1)
         latencies = sorted([float(x) for x in raw_latencies]) if raw_latencies else []
         avg_latency = f"{sum(latencies) / len(latencies):.1f}s" if latencies else "—"
-
         return {
             "total_queries": total,
             "hallucination_rate": f"{(hallucinations / total * 100):.0f}%" if total > 0 else "0%",
@@ -144,13 +159,12 @@ def get_latency_percentiles() -> dict:
 
 def get_langsmith_metrics() -> dict:
     try:
-        client = Client()
+        client = Client(timeout_ms=10000)
         runs = list(client.list_runs(
             project_name=os.getenv("LANGCHAIN_PROJECT", "un-governance-demo"),
             run_type="llm",
             limit=100
         ))
-
         if not runs:
             return {
                 "avg_latency": "—", "total_tokens": 0, "total_cost": "$0.00",
@@ -159,7 +173,6 @@ def get_langsmith_metrics() -> dict:
                 "cost_per_query": "$0.00", "p95_latency": "—",
                 "model_distribution": {}
             }
-
         total_tokens = 0
         prompt_tokens = 0
         completion_tokens = 0
@@ -167,7 +180,6 @@ def get_langsmith_metrics() -> dict:
         errors = 0
         latencies = []
         model_distribution = {}
-
         for run in runs:
             total_tokens += run.total_tokens or 0
             prompt_tokens += run.prompt_tokens or 0
@@ -179,14 +191,12 @@ def get_langsmith_metrics() -> dict:
                 latencies.append((run.end_time - run.start_time).total_seconds())
             model = getattr(run, "extra", {}).get("invocation_params", {}).get("model_name", "unknown") if run.extra else "unknown"
             model_distribution[model] = model_distribution.get(model, 0) + 1
-
         latencies_sorted = sorted(latencies)
         avg_latency = f"{sum(latencies) / len(latencies):.2f}s" if latencies else "—"
         p95_idx = int(len(latencies_sorted) * 0.95)
         p95_latency = f"{latencies_sorted[min(p95_idx, len(latencies_sorted)-1)]:.2f}s" if latencies_sorted else "—"
         error_rate = f"{(errors / len(runs) * 100):.0f}%" if runs else "0%"
         cost_per_query = f"${float(total_cost) / len(runs):.6f}" if runs else "$0.00"
-
         return {
             "avg_latency": avg_latency,
             "p95_latency": p95_latency,
@@ -235,30 +245,54 @@ def get_pii_entity_breakdown() -> dict:
         return {}
 
 def get_metrics() -> dict:
-    client = get_redis_client()
-    total = int(client.get("metrics:total_queries") or 0)
-    cache_hits = int(client.get("metrics:cache_hits") or 0)
-    hallucinations = int(client.get("metrics:hallucinations") or 0)
-    pii_detected = int(client.get("metrics:pii_detected") or 0)
-    injection_attempts = int(client.get("security:injection") or 0)
+    try:
+        client = get_redis_client()
+        total = int(client.get("metrics:total_queries") or 0)
+        cache_hits = int(client.get("metrics:cache_hits") or 0)
+        hallucinations = int(client.get("metrics:hallucinations") or 0)
+        pii_detected = int(client.get("metrics:pii_detected") or 0)
+        injection_attempts = int(client.get("security:injection") or 0)
 
-    style_distribution = {}
-    for style in ["factual", "analytical", "summary", "safety", "adversarial"]:
-        count = int(client.get(f"metrics:style:{style}") or 0)
-        if count > 0:
-            style_distribution[style] = count
+        style_distribution = {}
+        for style in ["factual", "analytical", "summary", "safety", "adversarial"]:
+            count = int(client.get(f"metrics:style:{style}") or 0)
+            if count > 0:
+                style_distribution[style] = count
 
-    top_sources = {}
-    for key in client.scan_iter("metrics:source:*"):
-        source = key.replace("metrics:source:", "")
-        top_sources[source] = int(client.get(key) or 0)
+        top_sources = {}
+        for key in client.scan_iter("metrics:source:*"):
+            source = key.replace("metrics:source:", "")
+            top_sources[source] = int(client.get(key) or 0)
+    except Exception as e:
+        print(f"Redis metrics error: {e}")
+        total = cache_hits = hallucinations = pii_detected = injection_attempts = 0
+        style_distribution = {}
+        top_sources = {}
 
-    langsmith = get_langsmith_metrics()
-    latency_percentiles = get_latency_percentiles()
-    redis_infra = get_redis_infrastructure_metrics()
-    es_metrics = get_elasticsearch_metrics()
-    pii_entities = get_pii_entity_breakdown()
-    user_activity = get_all_user_activity()
+    # Fetch external metrics concurrently
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            "langsmith": executor.submit(get_langsmith_metrics),
+            "latency": executor.submit(get_latency_percentiles),
+            "redis_infra": executor.submit(get_redis_infrastructure_metrics),
+            "es": executor.submit(get_elasticsearch_metrics),
+            "pii_entities": executor.submit(get_pii_entity_breakdown),
+            "user_activity": executor.submit(get_all_user_activity),
+        }
+        results = {}
+        for key, future in futures.items():
+            try:
+                results[key] = future.result(timeout=15)
+            except Exception as e:
+                print(f"Metrics fetch failed for {key}: {e}")
+                results[key] = {}
+
+    langsmith = results.get("langsmith", {})
+    latency_percentiles = results.get("latency", {})
+    redis_infra = results.get("redis_infra", {})
+    es_metrics = results.get("es", {})
+    pii_entities = results.get("pii_entities", {})
+    user_activity = results.get("user_activity", [])
 
     return {
         "total_queries": total,
@@ -273,16 +307,16 @@ def get_metrics() -> dict:
         "latency_p99": latency_percentiles.get("p99", "—"),
         "latency_min": latency_percentiles.get("min", "—"),
         "latency_max": latency_percentiles.get("max", "—"),
-        "avg_latency": langsmith["avg_latency"],
-        "p95_latency": langsmith["p95_latency"],
-        "total_tokens": langsmith["total_tokens"],
-        "prompt_tokens": langsmith["prompt_tokens"],
-        "completion_tokens": langsmith["completion_tokens"],
-        "total_cost": langsmith["total_cost"],
-        "cost_per_query": langsmith["cost_per_query"],
-        "error_rate": langsmith["error_rate"],
-        "total_llm_runs": langsmith["total_llm_runs"],
-        "model_distribution": langsmith["model_distribution"],
+        "avg_latency": langsmith.get("avg_latency", "—"),
+        "p95_latency": langsmith.get("p95_latency", "—"),
+        "total_tokens": langsmith.get("total_tokens", 0),
+        "prompt_tokens": langsmith.get("prompt_tokens", 0),
+        "completion_tokens": langsmith.get("completion_tokens", 0),
+        "total_cost": langsmith.get("total_cost", "$0.00"),
+        "cost_per_query": langsmith.get("cost_per_query", "$0.00"),
+        "error_rate": langsmith.get("error_rate", "—"),
+        "total_llm_runs": langsmith.get("total_llm_runs", 0),
+        "model_distribution": langsmith.get("model_distribution", {}),
         "es_document_count": es_metrics.get("document_count", "—"),
         "redis_memory_used": redis_infra.get("memory_used", "—"),
         "redis_memory_peak": redis_infra.get("memory_peak", "—"),
@@ -296,9 +330,13 @@ def get_metrics() -> dict:
     }
 
 def get_security_events() -> dict:
-    client = get_redis_client()
-    return {
-        "injection_attempts": int(client.get("security:injection") or 0),
-        "pii_detected": int(client.get("security:pii") or 0),
-        "rate_limit_hits": int(client.get("security:rate_limit") or 0),
-    }
+    try:
+        client = get_redis_client()
+        return {
+            "injection_attempts": int(client.get("security:injection") or 0),
+            "pii_detected": int(client.get("security:pii") or 0),
+            "rate_limit_hits": int(client.get("security:rate_limit") or 0),
+        }
+    except Exception as e:
+        print(f"Security events error: {e}")
+        return {"injection_attempts": 0, "pii_detected": 0, "rate_limit_hits": 0}

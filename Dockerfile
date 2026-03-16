@@ -12,8 +12,7 @@ RUN pip install --no-cache-dir -r requirements.prod.txt
 
 COPY src/ ./src/
 COPY data/ ./data/
-COPY .env .
 
-EXPOSE 8000
+EXPOSE 80
 
-CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "80"]

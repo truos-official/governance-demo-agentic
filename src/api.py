@@ -1,26 +1,33 @@
 import time
+import json
+import logging
+from datetime import datetime
 from pydantic import BaseModel
-from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
+from os import getenv
 from src.rag_chain import build_chain
 from src.query_classifier import classify_query
 from src.security import run_security_checks, anonymize_pii
 from src.hallucination_detector import detect_hallucination
 from src.metrics_tracker import (
     track_query, track_security_event, get_metrics, get_security_events,
-    get_redis_client, track_user_query, get_user_metrics
+    get_redis_client, track_user_query, get_user_metrics, get_all_user_activity
 )
 
 load_dotenv()
 
+logger = logging.getLogger("uvicorn")
+
 app = FastAPI()
 
+cors_origins = getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[o.strip() for o in cors_origins],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -63,6 +70,15 @@ class RegisterRequest(BaseModel):
     company: str
     country: str
 
+@app.get("/health")
+def health():
+    try:
+        client = get_redis_client()
+        client.ping()
+        return {"status": "healthy", "redis": "connected"}
+    except Exception as e:
+        return {"status": "degraded", "redis": str(e)}
+
 @app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
     start_time = time.time()
@@ -80,13 +96,16 @@ def query(request: QueryRequest):
 
     if not security["passed"]:
         if security["injection_detected"]:
-            track_security_event("injection")
+            try: track_security_event("injection")
+            except: pass
         if not security["rate_limit_ok"]:
-            track_security_event("rate_limit")
+            try: track_security_event("rate_limit")
+            except: pass
         raise HTTPException(status_code=400, detail=security)
 
     if security["pii_detected"]:
-        track_security_event("pii")
+        try: track_security_event("pii")
+        except: pass
 
     clean_query = anonymize_pii(request.question)
     prompt_type = classification["style"]
@@ -100,21 +119,24 @@ def query(request: QueryRequest):
     )
 
     latency = time.time() - start_time
-    track_query(
-        style=prompt_type,
-        sources=result.get("sources", []),
-        is_hallucination=hallucination["is_hallucination"],
-        cache_hit=result.get("cache_hit", False),
-        pii_detected=security["pii_detected"],
-        latency=latency
-    )
 
-    track_user_query(
-        user_id=request.user_id,
-        style=prompt_type,
-        is_hallucination=hallucination["is_hallucination"],
-        latency=latency
-    )
+    try:
+        track_query(
+            style=prompt_type,
+            sources=result.get("sources", []),
+            is_hallucination=hallucination["is_hallucination"],
+            cache_hit=result.get("cache_hit", False),
+            pii_detected=security["pii_detected"],
+            latency=latency
+        )
+        track_user_query(
+            user_id=request.user_id,
+            style=prompt_type,
+            is_hallucination=hallucination["is_hallucination"],
+            latency=latency
+        )
+    except Exception as e:
+        logger.warning(f"Metrics tracking failed (non-fatal): {e}")
 
     return QueryResponse(
         answer=result["answer"],
@@ -133,65 +155,77 @@ def security_events():
 
 @app.post("/clear-cache")
 def clear_cache():
-    client = get_redis_client()
-    deleted = 0
-    for key in client.scan_iter("cache:*"):
-        client.delete(key)
-        deleted += 1
-    return {"cleared": deleted, "message": f"Cleared {deleted} cache entries"}
+    try:
+        client = get_redis_client()
+        deleted = 0
+        for key in client.scan_iter("cache:*"):
+            client.delete(key)
+            deleted += 1
+        return {"cleared": deleted, "message": f"Cleared {deleted} cache entries"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/reset-metrics")
 def reset_metrics():
-    client = get_redis_client()
-    deleted = 0
-    for key in client.scan_iter("metrics:*"):
-        client.delete(key)
-        deleted += 1
-    for key in client.scan_iter("security:*"):
-        client.delete(key)
-        deleted += 1
-    return {"cleared": deleted, "message": f"Reset {deleted} metric keys"}
+    try:
+        client = get_redis_client()
+        deleted = 0
+        for key in client.scan_iter("metrics:*"):
+            client.delete(key)
+            deleted += 1
+        for key in client.scan_iter("security:*"):
+            client.delete(key)
+            deleted += 1
+        return {"cleared": deleted, "message": f"Reset {deleted} metric keys"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/register")
 def register(request: RegisterRequest):
-    import json
-    from datetime import datetime
-    client = get_redis_client()
-    profile = {
-        "user_id": request.user_id,
-        "provider": request.provider,
-        "full_name": request.full_name,
-        "email": request.email,
-        "title": request.title,
-        "company": request.company,
-        "country": request.country,
-        "registered_at": datetime.utcnow().isoformat(),
-        "last_active": datetime.utcnow().isoformat()
-    }
-    client.set(f"user:{request.user_id}:profile", json.dumps(profile))
-    client.sadd("users:all", request.user_id)
-    return {"status": "registered", "profile": profile}
+    try:
+        client = get_redis_client()
+        profile = {
+            "user_id": request.user_id,
+            "provider": request.provider,
+            "full_name": request.full_name,
+            "email": request.email,
+            "title": request.title,
+            "company": request.company,
+            "country": request.country,
+            "registered_at": datetime.utcnow().isoformat(),
+            "last_active": datetime.utcnow().isoformat()
+        }
+        client.set(f"user:{request.user_id}:profile", json.dumps(profile))
+        client.sadd("users:all", request.user_id)
+        logger.info(f"NEW_USER_REGISTERED: {json.dumps(profile)}")
+        return {"status": "registered", "profile": profile}
+    except Exception as e:
+        logger.error(f"Registration failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
 
 @app.get("/user-profile/{user_id}")
 def get_user_profile(user_id: str):
-    import json
-    client = get_redis_client()
-    raw = client.get(f"user:{user_id}:profile")
-    if not raw:
+    try:
+        client = get_redis_client()
+        raw = client.get(f"user:{user_id}:profile")
+        if not raw:
+            return {"profile": None}
+        return {"profile": json.loads(raw)}
+    except Exception as e:
         return {"profile": None}
-    return {"profile": json.loads(raw)}
 
 @app.get("/users")
 def get_all_users():
-    import json
-    from datetime import datetime
-    client = get_redis_client()
-    user_ids = client.smembers("users:all")
-    users = []
-    for uid in user_ids:
-        raw = client.get(f"user:{uid}:profile")
-        if raw:
-            profile = json.loads(raw)
-            user_metrics = get_user_metrics(uid)
-            users.append({**profile, **user_metrics})
-    return {"users": users, "total": len(users)}
+    try:
+        client = get_redis_client()
+        user_ids = client.smembers("users:all")
+        users = []
+        for uid in user_ids:
+            raw = client.get(f"user:{uid}:profile")
+            if raw:
+                profile = json.loads(raw)
+                user_metrics = get_user_metrics(uid)
+                users.append({**profile, **user_metrics})
+        return {"users": users, "total": len(users)}
+    except Exception as e:
+        return {"users": [], "total": 0}

@@ -26,6 +26,19 @@ const COUNTRIES = [
   'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe'
 ];
 
+const inputStyle = {
+  width: '100%', padding: '0.75rem 1rem', border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-sm)', fontFamily: 'DM Sans, sans-serif',
+  fontSize: '0.9rem', color: 'var(--text-primary)', background: 'var(--surface)',
+  outline: 'none', boxSizing: 'border-box'
+};
+
+const labelStyle = {
+  display: 'block', fontSize: '0.78rem', fontWeight: '600',
+  color: 'var(--text-secondary)', marginBottom: '0.4rem',
+  textTransform: 'uppercase', letterSpacing: '0.04em'
+};
+
 export default function AuthGate({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -42,36 +55,45 @@ export default function AuthGate({ children }) {
   });
 
   useEffect(() => {
-    // Fetch Azure SWA auth identity
     fetch('/.auth/me')
       .then(res => res.json())
       .then(data => {
         const principal = data?.clientPrincipal;
         if (principal) {
           const claims = principal.claims || [];
-          const emailClaim = claims.find(c => c.typ === 'emails' || c.typ === 'email' || c.typ === 'preferred_username');
-          const nameClaim = claims.find(c => c.typ === 'name');
+          const emailClaim = claims.find(c =>
+            c.typ === 'emails' || c.typ === 'email' ||
+            c.typ === 'preferred_username' ||
+            c.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'
+          );
+          const nameClaim = claims.find(c =>
+            c.typ === 'name' ||
+            c.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+          );
           const userData = {
             id: principal.userId,
-            name: nameClaim?.val || principal.userDetails || '',
+            name: nameClaim?.val || '',
             email: emailClaim?.val || principal.userDetails || '',
             provider: principal.identityProvider
           };
           setUser(userData);
-          setForm(f => ({ ...f, full_name: userData.name, email: userData.email }));
+          // Pre-fill only from real Azure auth identity
+          setForm(f => ({
+            ...f,
+            full_name: userData.name,
+            email: userData.email
+          }));
           checkProfile(userData.id);
         } else {
-          // Not on Azure SWA — dev mode, bypass auth
-          const devUser = { id: 'dev_user', name: 'Developer', email: 'dev@localhost', provider: 'dev' };
+          // Dev mode — no pre-fill, empty form
+          const devUser = { id: 'dev_user', name: '', email: '', provider: 'dev' };
           setUser(devUser);
-          setForm(f => ({ ...f, full_name: devUser.name, email: devUser.email }));
           checkProfile(devUser.id);
         }
       })
       .catch(() => {
-        const devUser = { id: 'dev_user', name: 'Developer', email: 'dev@localhost', provider: 'dev' };
+        const devUser = { id: 'dev_user', name: '', email: '', provider: 'dev' };
         setUser(devUser);
-        setForm(f => ({ ...f, full_name: devUser.name, email: devUser.email }));
         checkProfile(devUser.id);
       });
   }, []);
@@ -96,7 +118,7 @@ export default function AuthGate({ children }) {
     if (!form.full_name.trim()) { setFormError('Full name is required'); return; }
     if (!form.email.trim()) { setFormError('Email is required'); return; }
     if (!form.title.trim()) { setFormError('Professional title is required'); return; }
-    if (!form.company.trim()) { setFormError('Company / Organization is required'); return; }
+    if (!form.company.trim()) { setFormError('Organization is required'); return; }
     if (!form.country) { setFormError('Country is required'); return; }
 
     setSubmitting(true);
@@ -109,7 +131,7 @@ export default function AuthGate({ children }) {
       });
       setProfile(form);
       setShowForm(false);
-    } catch {
+    } catch (err) {
       setFormError('Registration failed. Please try again.');
     } finally {
       setSubmitting(false);
@@ -122,7 +144,7 @@ export default function AuthGate({ children }) {
       background: 'var(--surface-2)'
     }}>
       <div style={{ textAlign: 'center' }}>
-        <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '0.75rem' }} />
+        <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '1rem' }} />
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading...</p>
       </div>
     </div>
@@ -138,43 +160,34 @@ export default function AuthGate({ children }) {
         border: '1px solid var(--border)', boxShadow: 'var(--shadow-3)',
         padding: '2.5rem', width: '100%', maxWidth: '520px'
       }}>
-        {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '0.75rem' }} />
+          <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '1rem' }} />
           <h2 style={{
             fontFamily: 'Syne, sans-serif', fontSize: '1.3rem', fontWeight: '700',
-            color: 'var(--text-primary)', marginBottom: '0.4rem'
+            color: 'var(--text-primary)', marginBottom: '0.5rem'
           }}>Complete Your Profile</h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
-            Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Please complete your profile to access the UN AI Governance Assistant.
+            Access to this system is by invitation only. Please complete your profile to continue.
           </p>
         </div>
 
-        {/* Form */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {[
-            { key: 'full_name', label: 'Full Name', placeholder: 'Your full name', type: 'text' },
-            { key: 'email', label: 'Email Address', placeholder: 'your@email.com', type: 'email' },
-            { key: 'title', label: 'Professional Title', placeholder: 'e.g. AI Policy Advisor', type: 'text' },
-            { key: 'company', label: 'Organization / Company', placeholder: 'e.g. United Nations OICT', type: 'text' },
+            { key: 'full_name', label: 'Full Name', placeholder: 'Enter your full name', type: 'text' },
+            { key: 'email', label: 'Work Email Address', placeholder: 'Enter your work email', type: 'email' },
+            { key: 'title', label: 'Professional Title', placeholder: 'e.g. AI Policy Advisor, Director, Researcher', type: 'text' },
+            { key: 'company', label: 'Organization / Company', placeholder: 'e.g. United Nations, World Bank, Government of Canada', type: 'text' },
           ].map(field => (
             <div key={field.key}>
-              <label style={{
-                display: 'block', fontSize: '0.78rem', fontWeight: '600',
-                color: 'var(--text-secondary)', marginBottom: '0.4rem',
-                textTransform: 'uppercase', letterSpacing: '0.04em'
-              }}>{field.label} <span style={{ color: 'var(--danger)' }}>*</span></label>
+              <label style={labelStyle}>
+                {field.label} <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
               <input
                 type={field.type}
                 value={form[field.key]}
                 onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
                 placeholder={field.placeholder}
-                style={{
-                  width: '100%', padding: '0.75rem 1rem', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)', fontFamily: 'DM Sans, sans-serif',
-                  fontSize: '0.9rem', color: 'var(--text-primary)', background: 'var(--surface)',
-                  outline: 'none', boxSizing: 'border-box'
-                }}
+                style={inputStyle}
                 onFocus={e => e.target.style.borderColor = 'var(--primary)'}
                 onBlur={e => e.target.style.borderColor = 'var(--border)'}
               />
@@ -182,19 +195,15 @@ export default function AuthGate({ children }) {
           ))}
 
           <div>
-            <label style={{
-              display: 'block', fontSize: '0.78rem', fontWeight: '600',
-              color: 'var(--text-secondary)', marginBottom: '0.4rem',
-              textTransform: 'uppercase', letterSpacing: '0.04em'
-            }}>Country <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <label style={labelStyle}>
+              Country <span style={{ color: 'var(--danger)' }}>*</span>
+            </label>
             <select
               value={form.country}
               onChange={e => setForm(f => ({ ...f, country: e.target.value }))}
               style={{
-                width: '100%', padding: '0.75rem 1rem', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)', fontFamily: 'DM Sans, sans-serif',
-                fontSize: '0.9rem', color: form.country ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                background: 'var(--surface)', outline: 'none', boxSizing: 'border-box',
+                ...inputStyle,
+                color: form.country ? 'var(--text-primary)' : 'var(--text-tertiary)',
                 cursor: 'pointer'
               }}
               onFocus={e => e.target.style.borderColor = 'var(--primary)'}
@@ -206,7 +215,9 @@ export default function AuthGate({ children }) {
           </div>
 
           {formError && (
-            <p style={{ color: 'var(--danger)', fontSize: '0.83rem', textAlign: 'center' }}>⚠️ {formError}</p>
+            <p style={{ color: 'var(--danger)', fontSize: '0.83rem', textAlign: 'center' }}>
+              ⚠️ {formError}
+            </p>
           )}
 
           <button
@@ -219,13 +230,13 @@ export default function AuthGate({ children }) {
           </button>
 
           <p style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textAlign: 'center', lineHeight: '1.55' }}>
-            Your information is stored securely and used only to personalize your experience and track usage analytics.
+            Your information is stored securely and used only to track usage and personalize your experience.
+            This system is restricted to invited users only.
           </p>
         </div>
       </div>
     </div>
   );
 
-  // Inject user into children via context
   return children({ user, profile });
 }
