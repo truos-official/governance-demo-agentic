@@ -1,10 +1,9 @@
 import os
 import json
 import redis
-import ssl
 from decimal import Decimal
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from langsmith import Client
 from elasticsearch import Elasticsearch
@@ -13,18 +12,22 @@ load_dotenv()
 
 REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
 REDIS_SOCKET_CONNECT_TIMEOUT = int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 5))
-REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
+REDIS_SSL = os.getenv("REDIS_SSL", "true").lower() == "true"
 
 def get_redis_client():
-    return redis.Redis(
-        host=os.getenv("REDIS_HOST"),
-        port=int(os.getenv("REDIS_PORT", 11423)),
-        password=os.getenv("REDIS_PASSWORD"),
-        ssl=REDIS_SSL,
-        decode_responses=True,
-        socket_timeout=REDIS_SOCKET_TIMEOUT,
-        socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT
-    )
+    kwargs = {
+        "host": os.getenv("REDIS_HOST"),
+        "port": int(os.getenv("REDIS_PORT", 6380)),
+        "password": os.getenv("REDIS_PASSWORD"),
+        "decode_responses": True,
+        "socket_timeout": REDIS_SOCKET_TIMEOUT,
+        "socket_connect_timeout": REDIS_SOCKET_CONNECT_TIMEOUT,
+    }
+    if REDIS_SSL:
+        kwargs["ssl"] = True
+        kwargs["ssl_cert_reqs"] = None
+        kwargs["username"] = ""          # Azure requires empty string, not "default"
+    return redis.Redis(**kwargs)
 
 def track_query(style: str, sources: list, is_hallucination: bool, cache_hit: bool, pii_detected: bool, latency: float):
     client = get_redis_client()
@@ -245,13 +248,11 @@ def get_metrics() -> dict:
         hallucinations = int(client.get("metrics:hallucinations") or 0)
         pii_detected = int(client.get("metrics:pii_detected") or 0)
         injection_attempts = int(client.get("security:injection") or 0)
-
         style_distribution = {}
         for style in ["factual", "analytical", "summary", "safety", "adversarial"]:
             count = int(client.get(f"metrics:style:{style}") or 0)
             if count > 0:
                 style_distribution[style] = count
-
         top_sources = {}
         for key in client.scan_iter("metrics:source:*"):
             source = key.replace("metrics:source:", "")
@@ -262,7 +263,6 @@ def get_metrics() -> dict:
         style_distribution = {}
         top_sources = {}
 
-    # Fetch external metrics concurrently
     with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {
             "langsmith": executor.submit(get_langsmith_metrics),

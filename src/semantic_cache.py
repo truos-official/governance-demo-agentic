@@ -1,6 +1,5 @@
 import json
 import os
-import ssl
 import numpy as np
 import redis
 from dotenv import load_dotenv
@@ -10,22 +9,26 @@ load_dotenv()
 
 SIMILARITY_THRESHOLD = 0.95
 CACHE_TTL = 3600
-REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
+REDIS_SSL = os.getenv("REDIS_SSL", "true").lower() == "true"
 REDIS_SOCKET_TIMEOUT = int(os.getenv("REDIS_SOCKET_TIMEOUT", 5))
 REDIS_SOCKET_CONNECT_TIMEOUT = int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 5))
 
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 def get_redis_client():
-    return redis.Redis(
-        host=os.getenv("REDIS_HOST"),
-        port=int(os.getenv("REDIS_PORT", 11423)),
-        password=os.getenv("REDIS_PASSWORD"),
-        ssl=REDIS_SSL,
-        decode_responses=True,
-        socket_timeout=REDIS_SOCKET_TIMEOUT,
-        socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT
-    )
+    kwargs = {
+        "host": os.getenv("REDIS_HOST"),
+        "port": int(os.getenv("REDIS_PORT", 6380)),
+        "password": os.getenv("REDIS_PASSWORD"),
+        "decode_responses": True,
+        "socket_timeout": REDIS_SOCKET_TIMEOUT,
+        "socket_connect_timeout": REDIS_SOCKET_CONNECT_TIMEOUT,
+    }
+    if REDIS_SSL:
+        kwargs["ssl"] = True
+        kwargs["ssl_cert_reqs"] = None
+        kwargs["username"] = ""          # Azure requires empty string, not "default
+    return redis.Redis(**kwargs)
 
 def cosine_similarity(a: list, b: list) -> float:
     a, b = np.array(a), np.array(b)
