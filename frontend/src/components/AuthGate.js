@@ -100,10 +100,16 @@ export default function AuthGate({ children }) {
 
   const checkProfile = async (userId) => {
     try {
-      const res = await axios.get(`${API_URL}/user-profile/${userId}`);
-      if (res.data?.profile) {
-        setProfile(res.data.profile);
+      const res = await axios.get(`${API_URL}/auth/validate/${userId}`);
+      const { status, profile } = res.data;
+      if (status === 'approved') {
+        setProfile(profile);
         setShowForm(false);
+      } else if (status === 'pending') {
+        setProfile(profile);
+        setShowForm('pending');
+      } else if (status === 'revoked') {
+        setShowForm('revoked');
       } else {
         setShowForm(true);
       }
@@ -146,6 +152,52 @@ export default function AuthGate({ children }) {
       <div style={{ textAlign: 'center' }}>
         <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '1rem' }} />
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading...</p>
+      </div>
+    </div>
+  );
+
+  if (showForm === 'pending') return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--surface-2)', padding: '2rem'
+    }}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border)', boxShadow: 'var(--shadow-3)',
+        padding: '2.5rem', width: '100%', maxWidth: '480px', textAlign: 'center'
+      }}>
+        <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '1.5rem' }} />
+        <h2 style={{ fontFamily: 'Syne, sans-serif', fontSize: '1.3rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.75rem' }}>
+          Access Pending Approval
+        </h2>
+        <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '1.5rem' }}>
+          Your registration has been received. An administrator will review your request shortly.
+          You will be able to access the system once approved.
+        </p>
+        <p style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
+          Registered as: <strong>{profile?.email}</strong>
+        </p>
+      </div>
+    </div>
+  );
+
+  if (showForm === 'revoked') return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--surface-2)', padding: '2rem'
+    }}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border)', boxShadow: 'var(--shadow-3)',
+        padding: '2.5rem', width: '100%', maxWidth: '480px', textAlign: 'center'
+      }}>
+        <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '1.5rem' }} />
+        <h2 style={{ fontFamily: 'Syne, sans-serif', fontSize: '1.3rem', fontWeight: '700', color: 'var(--danger)', marginBottom: '0.75rem' }}>
+          Access Revoked
+        </h2>
+        <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+          Your access to this system has been revoked. Please contact the administrator if you believe this is an error.
+        </p>
       </div>
     </div>
   );
@@ -226,7 +278,7 @@ export default function AuthGate({ children }) {
             disabled={submitting}
             style={{ width: '100%', padding: '0.875rem', marginTop: '0.5rem', fontSize: '0.95rem' }}
           >
-            {submitting ? 'Saving...' : 'Access the Assistant →'}
+            {submitting ? 'Saving...' : 'Request Access →'}
           </button>
 
           <p style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textAlign: 'center', lineHeight: '1.55' }}>

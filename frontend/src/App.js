@@ -6,10 +6,14 @@ import SecurityTab from './components/SecurityTab';
 import ArchitectureTab from './components/ArchitectureTab';
 import ResponsibleAITab from './components/ResponsibleAITab';
 import EvalTab from './components/EvalTab';
+import AdminTab from './components/AdminTab';
 import './App.css';
 
 function AppContent({ user, profile }) {
   const [activeTab, setActiveTab] = useState('query');
+
+  const ADMIN_EMAIL = 'tristan.gitman@un.org';
+  const isAdmin = user?.email === ADMIN_EMAIL;
 
   const tabs = [
     { id: 'query', label: '🔍 Query' },
@@ -18,6 +22,7 @@ function AppContent({ user, profile }) {
     { id: 'architecture', label: '🏗️ Architecture' },
     { id: 'responsible-ai', label: '⚖️ Responsible AI' },
     { id: 'evals', label: '🧪 Evals' },
+    ...(isAdmin ? [{ id: 'admin', label: '👤 Admin' }] : []),
   ];
 
   const handleLogout = () => {
@@ -82,6 +87,7 @@ function AppContent({ user, profile }) {
         {activeTab === 'architecture' && <ArchitectureTab />}
         {activeTab === 'responsible-ai' && <ResponsibleAITab />}
         {activeTab === 'evals' && <EvalTab />}
+        {activeTab === 'admin' && isAdmin && <AdminTab currentUserId={user?.id} />}
       </main>
 
       <footer style={{

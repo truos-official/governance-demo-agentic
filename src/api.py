@@ -193,10 +193,12 @@ def register(request: RegisterRequest):
             "company": request.company,
             "country": request.country,
             "registered_at": datetime.utcnow().isoformat(),
-            "last_active": datetime.utcnow().isoformat()
+            "last_active": datetime.utcnow().isoformat(),
+            "status": "pending"
         }
         client.set(f"user:{request.user_id}:profile", json.dumps(profile))
         client.sadd("users:all", request.user_id)
+        client.sadd("users:pending", request.user_id)
         logger.info(f"NEW_USER_REGISTERED: {json.dumps(profile)}")
         return {"status": "registered", "profile": profile}
     except Exception as e:
@@ -229,3 +231,58 @@ def get_all_users():
         return {"users": users, "total": len(users)}
     except Exception as e:
         return {"users": [], "total": 0}
+    
+@app.post("/auth/approve")
+def approve_user(user_id: str, approved_by: str = "admin"):
+    try:
+        client = get_redis_client()
+        raw = client.get(f"user:{user_id}:profile")
+        if not raw:
+            raise HTTPException(status_code=404, detail="User not found")
+        profile = json.loads(raw)
+        profile["status"] = "approved"
+        profile["approved_by"] = approved_by
+        profile["approved_at"] = datetime.utcnow().isoformat()
+        client.set(f"user:{user_id}:profile", json.dumps(profile))
+        client.sadd("users:approved", user_id)
+        client.srem("users:pending", user_id)
+        logger.info(f"USER_APPROVED: {user_id} by {approved_by}")
+        return {"status": "approved", "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/revoke")
+def revoke_user(user_id: str, revoked_by: str = "admin"):
+    try:
+        client = get_redis_client()
+        raw = client.get(f"user:{user_id}:profile")
+        if not raw:
+            raise HTTPException(status_code=404, detail="User not found")
+        profile = json.loads(raw)
+        profile["status"] = "revoked"
+        profile["revoked_by"] = revoked_by
+        profile["revoked_at"] = datetime.utcnow().isoformat()
+        client.set(f"user:{user_id}:profile", json.dumps(profile))
+        client.srem("users:approved", user_id)
+        client.sadd("users:revoked", user_id)
+        logger.info(f"USER_REVOKED: {user_id} by {revoked_by}")
+        return {"status": "revoked", "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/auth/validate/{user_id}")
+def validate_user(user_id: str):
+    try:
+        client = get_redis_client()
+        raw = client.get(f"user:{user_id}:profile")
+        if not raw:
+            return {"status": "unregistered"}
+        profile = json.loads(raw)
+        status = profile.get("status", "pending")
+        return {"status": status, "profile": profile}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
