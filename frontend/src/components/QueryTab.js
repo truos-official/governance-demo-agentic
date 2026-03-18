@@ -30,7 +30,8 @@ export default function QueryTab({ user, profile }) {
       });
       setResult(response.data);
     } catch (err) {
-      setError(err.response?.data?.detail || 'An error occurred');
+      const detail = err.response?.data?.detail;
+      setError(detail || 'An error occurred');
     } finally {
       setLoading(false);
     }
@@ -93,9 +94,22 @@ export default function QueryTab({ user, profile }) {
 
       {error && (
         <div className="card" style={{ borderLeft: '4px solid var(--danger)' }}>
-          <p style={{ color: 'var(--danger)', fontSize: '0.9rem' }}>
-            ⚠️ {typeof error === 'string' ? error : JSON.stringify(error)}
-          </p>
+          {typeof error === 'object' && error.injection_detected ? (
+            <div>
+              <p style={{ color: 'var(--danger)', fontSize: '0.9rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+                🚫 Query Blocked by Security Controls
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                {error.injection_detected && <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)' }}>⚠️ Potential prompt injection detected</p>}
+                {error.pii_detected && <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)' }}>🔒 Personal information detected and blocked: {error.pii_entities?.map(e => e.type).join(', ')}</p>}
+                {!error.rate_limit_ok && <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)' }}>⏱️ Rate limit exceeded. Please wait before trying again.</p>}
+              </div>
+            </div>
+          ) : (
+            <p style={{ color: 'var(--danger)', fontSize: '0.9rem' }}>
+              ⚠️ {typeof error === 'string' ? error : JSON.stringify(error)}
+            </p>
+          )}
         </div>
       )}
 
