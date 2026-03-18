@@ -7,6 +7,7 @@ import ArchitectureTab from './components/ArchitectureTab';
 import ResponsibleAITab from './components/ResponsibleAITab';
 import EvalTab from './components/EvalTab';
 import AdminTab from './components/AdminTab';
+import GovernanceTab from './components/GovernanceTab';
 import './App.css';
 import axios from 'axios';
 
@@ -26,6 +27,7 @@ function AppContent({ user, profile }) {
     { id: 'security', label: '🔒 Security' },
     { id: 'architecture', label: '🏗️ Architecture' },
     { id: 'responsible-ai', label: '⚖️ Responsible AI' },
+    { id: 'governance', label: '✅ Governance' },
     { id: 'evals', label: '🧪 Evals' },
     ...(isAdmin ? [{ id: 'admin', label: '👤 Admin' }] : []),
   ];
@@ -99,6 +101,7 @@ const handleLogout = async () => {
         {activeTab === 'security' && <SecurityTab />}
         {activeTab === 'architecture' && <ArchitectureTab />}
         {activeTab === 'responsible-ai' && <ResponsibleAITab />}
+        {activeTab === 'governance' && <GovernanceTab />}
         {activeTab === 'evals' && <EvalTab />}
         {activeTab === 'admin' && isAdmin && <AdminTab currentUserId={user?.id} />}
       </main>
