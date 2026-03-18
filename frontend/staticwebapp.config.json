@@ -1,18 +1,8 @@
 {
-  "auth": {
-    "identityProviders": {
-      "azureActiveDirectory": {
-        "enabled": true
-      },
-      "gitHub": {
-        "enabled": true
-      }
-    }
-  },
   "routes": [
     {
       "route": "/*",
-      "allowedRoles": ["approved"]
+      "allowedRoles": ["authenticated"]
     }
   ],
   "responseOverrides": {

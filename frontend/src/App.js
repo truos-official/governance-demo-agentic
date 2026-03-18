@@ -8,12 +8,17 @@ import ResponsibleAITab from './components/ResponsibleAITab';
 import EvalTab from './components/EvalTab';
 import AdminTab from './components/AdminTab';
 import './App.css';
+import axios from 'axios';
+
+const API_URL = process.env.REACT_APP_API_URL;
 
 function AppContent({ user, profile }) {
   const [activeTab, setActiveTab] = useState('query');
 
   const ADMIN_EMAIL = 'tristan.gitman@un.org';
-  const isAdmin = user?.email === ADMIN_EMAIL;
+  const isAdmin = 
+  user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ||
+  profile?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   const tabs = [
     { id: 'query', label: '🔍 Query' },
@@ -25,9 +30,17 @@ function AppContent({ user, profile }) {
     ...(isAdmin ? [{ id: 'admin', label: '👤 Admin' }] : []),
   ];
 
-  const handleLogout = () => {
+const handleLogout = async () => {
+  const isLocal = window.location.hostname === 'localhost';
+  if (isLocal) {
+    try {
+      await axios.post(`${API_URL}/auth/logout-dev?user_id=${user?.id}`);
+    } catch {}
+    window.location.reload();
+  } else {
     window.location.href = '/.auth/logout';
-  };
+  }
+};
 
   return (
     <div className="app">

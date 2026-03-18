@@ -22,7 +22,7 @@ const COUNTRIES = [
   'Somalia', 'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan',
   'Sweden', 'Switzerland', 'Syria', 'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Togo',
   'Tunisia', 'Turkey', 'Turkmenistan', 'Uganda', 'Ukraine', 'United Arab Emirates',
-  'United Kingdom', 'United Nations', 'United States', 'Uruguay', 'Uzbekistan', 'Venezuela',
+  'United Kingdom','United States', 'Uruguay', 'Uzbekistan', 'Venezuela',
   'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe'
 ];
 
@@ -47,11 +47,7 @@ export default function AuthGate({ children }) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
-    full_name: '',
-    email: '',
-    title: '',
-    company: '',
-    country: ''
+    full_name: '', email: '', title: '', company: '', country: ''
   });
 
   useEffect(() => {
@@ -77,15 +73,9 @@ export default function AuthGate({ children }) {
             provider: principal.identityProvider
           };
           setUser(userData);
-          // Pre-fill only from real Azure auth identity
-          setForm(f => ({
-            ...f,
-            full_name: userData.name,
-            email: userData.email
-          }));
+          setForm(f => ({ ...f, full_name: userData.name, email: userData.email }));
           checkProfile(userData.id);
         } else {
-          // Dev mode — no pre-fill, empty form
           const devUser = { id: 'dev_user', name: '', email: '', provider: 'dev' };
           setUser(devUser);
           checkProfile(devUser.id);
@@ -130,13 +120,19 @@ export default function AuthGate({ children }) {
     setSubmitting(true);
     setFormError('');
     try {
-      await axios.post(`${API_URL}/register`, {
+      const res = await axios.post(`${API_URL}/register`, {
         user_id: user.id,
         provider: user.provider,
         ...form
       });
-      setProfile(form);
-      setShowForm(false);
+      const status = res.data?.profile?.status;
+      if (status === 'approved') {
+        setProfile(res.data.profile);
+        setShowForm(false);
+      } else {
+        setProfile(res.data.profile);
+        setShowForm('pending');
+      }
     } catch (err) {
       setFormError('Registration failed. Please try again.');
     } finally {
