@@ -22,6 +22,8 @@ export default function AdminTab({ currentUserId }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [actionLoading, setActionLoading] = useState(null);
+  const [feedbackData, setFeedbackData] = useState([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
 
   const fetchUsers = async () => {
     try {
@@ -55,6 +57,26 @@ export default function AdminTab({ currentUserId }) {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const fetchFeedback = async () => {
+    setFeedbackLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/feedback/export`);
+      setFeedbackData(res.data.feedback || []);
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  const exportFinetune = async () => {
+    const res = await axios.get(`${API_URL}/feedback/finetune-export`);
+    const blob = new Blob([res.data.jsonl], { type: 'application/jsonl' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'finetune_data.jsonl';
+    a.click();
   };
 
   const filtered = users.filter(u => filter === 'all' || u.status === filter);
@@ -99,7 +121,7 @@ export default function AdminTab({ currentUserId }) {
         ))}
       </div>
 
-      {/* Table */}
+      {/* Users Table */}
       {loading ? (
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading users...</p>
       ) : filtered.length === 0 ? (
@@ -164,6 +186,69 @@ export default function AdminTab({ currentUserId }) {
           </table>
         </div>
       )}
+
+      {/* Feedback Section */}
+      <div style={{ marginTop: '2rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <h2 style={{ fontFamily: 'Syne, sans-serif', fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+            💬 Response Feedback
+          </h2>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button onClick={fetchFeedback} style={{
+              padding: '0.4rem 0.9rem', borderRadius: '6px', border: '1px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: '0.8rem', cursor: 'pointer'
+            }}>
+              {feedbackLoading ? 'Loading...' : 'Load Feedback'}
+            </button>
+            <button onClick={exportFinetune} style={{
+              padding: '0.4rem 0.9rem', borderRadius: '6px', border: 'none',
+              background: 'var(--primary)', color: '#fff', fontSize: '0.8rem',
+              fontWeight: '600', cursor: 'pointer'
+            }}>
+              ⬇️ Export Fine-tune JSONL
+            </button>
+          </div>
+        </div>
+
+        {feedbackData.length > 0 && (
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                  {['Rating', 'Question', 'Comment', 'User', 'Date'].map(h => (
+                    <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {feedbackData.map((fb, i) => (
+                  <tr key={fb.query_id} style={{ borderBottom: i < feedbackData.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <td style={{ padding: '0.85rem 1rem', fontSize: '1.1rem' }}>
+                      {fb.rating === 1 ? '👍' : '👎'}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)', maxWidth: '300px' }}>
+                      <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {fb.question}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+                      {fb.comment || '—'}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+                      {fb.user_id}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+                      {fb.submitted_at?.slice(0, 10) || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
