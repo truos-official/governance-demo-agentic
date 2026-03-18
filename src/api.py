@@ -2,7 +2,7 @@ import time
 import json
 import logging
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
@@ -40,6 +40,8 @@ You cover AI policy, human rights, military AI, biodiversity, sustainable develo
 You auto-detect query intent, anonymize PII, detect hallucinations, and refuse adversarial queries.
 You supplement UN document knowledge with general knowledge on AI governance and UN/EU policy when needed."""
 
+ADMIN_EMAIL = getenv("ADMIN_EMAIL", "tristan.gitman@un.org").strip().lower()
+
 def answer_meta_question(query: str) -> str:
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     prompt = f"""You are an AI assistant. Answer this question about yourself using only the context below.
@@ -69,6 +71,14 @@ class RegisterRequest(BaseModel):
     title: str
     company: str
     country: str
+
+class FeedbackRequest(BaseModel):
+    query_id: str
+    question: str
+    answer: str
+    rating: int = Field(..., ge=-1, le=1)
+    user_id: str = "anonymous"
+    comment: str = ""
 
 @app.get("/health")
 def health():
@@ -184,13 +194,13 @@ def reset_metrics():
 def register(request: RegisterRequest):
     try:
         client = get_redis_client()
-        is_admin = request.email.lower() == "tristan.gitman@un.org"
+        is_admin = request.email.strip().lower() == ADMIN_EMAIL
         status = "approved" if is_admin else "pending"
         profile = {
             "user_id": request.user_id,
             "provider": request.provider,
             "full_name": request.full_name,
-            "email": request.email,
+            "email": request.email.strip().lower(),
             "title": request.title,
             "company": request.company,
             "country": request.country,
@@ -271,6 +281,7 @@ def revoke_user(user_id: str, revoked_by: str = "admin"):
         profile["revoked_at"] = datetime.utcnow().isoformat()
         client.set(f"user:{user_id}:profile", json.dumps(profile))
         client.srem("users:approved", user_id)
+        client.srem("users:pending", user_id)
         client.sadd("users:revoked", user_id)
         logger.info(f"USER_REVOKED: {user_id} by {revoked_by}")
         return {"status": "revoked", "user_id": user_id}
@@ -300,6 +311,71 @@ def logout_dev(user_id: str):
         client.srem("users:all", user_id)
         client.srem("users:approved", user_id)
         client.srem("users:pending", user_id)
+        client.srem("users:revoked", user_id)
         return {"status": "logged_out"}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
+
+@app.post("/feedback")
+def submit_feedback(request: FeedbackRequest):
+    try:
+        client = get_redis_client()
+        feedback = {
+            "query_id": request.query_id,
+            "question": request.question,
+            "answer": request.answer,
+            "rating": request.rating,
+            "user_id": request.user_id,
+            "comment": request.comment,
+            "submitted_at": datetime.utcnow().isoformat()
+        }
+        client.set(f"feedback:{request.query_id}", json.dumps(feedback))
+        client.sadd("feedback:all", request.query_id)
+        if request.rating < 0:
+            client.sadd("feedback:negative", request.query_id)
+            client.srem("feedback:positive", request.query_id)
+        else:
+            client.sadd("feedback:positive", request.query_id)
+            client.srem("feedback:negative", request.query_id)
+        client.incr(f"metrics:feedback:{'positive' if request.rating == 1 else 'negative'}")
+        logger.info(f"FEEDBACK: query_id={request.query_id} rating={request.rating} user={request.user_id}")
+        return {"status": "recorded"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/feedback/export")
+def export_feedback():
+    try:
+        client = get_redis_client()
+        query_ids = client.smembers("feedback:all")
+        feedback_list = []
+        for qid in query_ids:
+            raw = client.get(f"feedback:{qid}")
+            if raw:
+                feedback_list.append(json.loads(raw))
+        feedback_list.sort(key=lambda x: x.get("submitted_at", ""), reverse=True)
+        return {"feedback": feedback_list, "total": len(feedback_list)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/feedback/finetune-export")
+def export_finetune():
+    try:
+        client = get_redis_client()
+        positive_ids = client.smembers("feedback:positive")
+        jsonl_lines = []
+        for qid in positive_ids:
+            raw = client.get(f"feedback:{qid}")
+            if raw:
+                fb = json.loads(raw)
+                line = {
+                    "messages": [
+                        {"role": "system", "content": "You are an AI Governance Assistant for the UN Secretariat."},
+                        {"role": "user", "content": fb["question"]},
+                        {"role": "assistant", "content": fb["answer"]}
+                    ]
+                }
+                jsonl_lines.append(json.dumps(line))
+        return {"jsonl": "\n".join(jsonl_lines), "total": len(jsonl_lines)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
