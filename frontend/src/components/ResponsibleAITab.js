@@ -1,205 +1,311 @@
 import React, { useState } from 'react';
 
-const risks = [
+const STEPS = [
   {
-    category: 'Input Risks',
-    color: '#d93025',
-    icon: '⚠️',
-    risks: [
-      {
-        risk: 'Prompt Injection',
-        kri: 'Injection Block Rate',
-        description: 'Malicious instructions designed to override AI behavior, extract system prompts, or bypass safety controls',
-        control: 'LLM-based injection detector — GPT-4o-mini evaluates full query context with confidence scoring, no brittle pattern lists',
-        component: 'query_classifier.py → classify_query()',
-        metric: 'Security Block Rate — Analytics tab',
-      },
-      {
-        risk: 'PII Exposure',
-        kri: 'PII Detection Rate',
-        description: 'User queries may contain personal identifiable information transmitted to external LLM APIs',
-        control: 'Azure Language Services detects and redacts PII before query reaches any LLM — entity types tracked per session',
-        component: 'security.py → detect_pii() / anonymize_pii()',
-        metric: 'PII Detection Rate — Analytics tab',
-      },
-      {
-        risk: 'Token Flooding',
-        kri: 'Token Length Violations',
-        description: 'Excessively long queries designed to exhaust context window, increase API costs, or cause DoS',
-        control: 'Token length validation — max 1000 tokens per query enforced before processing',
-        component: 'security.py → validate_token_length()',
-        metric: 'Query length distribution — LangSmith',
-      },
-      {
-        risk: 'Rate Abuse',
-        kri: 'Rate Limit Hit Rate',
-        description: 'Automated query flooding to exhaust API credits or degrade system performance for other users',
-        control: 'Per-user rate limiting — 10 requests/minute tracked in Redis, independent per authenticated user ID',
-        component: 'security.py → check_rate_limit()',
-        metric: 'Rate Limit Hits — Security tab',
-      },
-    ]
-  },
-  {
-    category: 'Identity & Access Risks',
+    step: 1,
+    name: 'Client Engagement',
+    description: 'Identify business requirements, use case scope, and stakeholder needs for the AI application.',
     color: '#009edb',
-    icon: '🔐',
+    icon: '🤝',
     risks: [
       {
-        risk: 'Unauthorized Access',
+        risk: 'Unclear Requirements',
+        kri: 'Use Case Rejection Rate',
+        control: 'Structured intake form captures business problem, expected outcomes, and success criteria before any technical work begins.',
+        component: 'AuthGate.js → Registration Form',
+        metric: 'Registered Users — Analytics Tab',
+      },
+      {
+        risk: 'Unauthorized Requestor',
         kri: 'Authentication Coverage',
-        description: 'Unauthenticated users accessing the system and submitting queries without accountability',
-        control: 'Azure Static Web Apps auth — all routes protected, Microsoft AAD and GitHub OAuth required before any page loads',
+        control: 'Azure AD authentication required before accessing the system. All users registered with organization and title.',
         component: 'staticwebapp.config.json + AuthGate.js',
-        metric: 'Registered Users — Analytics tab',
-      },
-      {
-        risk: 'Anonymous Usage',
-        kri: 'User Registration Rate',
-        description: 'Inability to track who is using the system, from which organization, and for what purpose',
-        control: 'Mandatory registration gate on first login — full name, email, title, organization, country required before access',
-        component: 'AuthGate.js → handleSubmit() + /register endpoint',
-        metric: 'User Activity Table — Analytics tab',
-      },
-      {
-        risk: 'No User Audit Trail',
-        kri: 'Per-user Activity Log',
-        description: 'Unable to attribute queries, hallucinations, or security events to specific users for compliance',
-        control: 'Per-user metrics tracked in Redis — query count, hallucination rate, avg latency, style distribution, last active',
-        component: 'metrics_tracker.py → track_user_query()',
-        metric: 'User Activity Table — Analytics tab',
+        metric: 'User Activity Table — Analytics Tab',
       },
     ]
   },
   {
-    category: 'Model Risks',
-    color: '#f9ab00',
-    icon: '🤖',
+    step: 2,
+    name: 'Use Case Review',
+    description: 'FinOps assessment, budget approval, success criteria definition, accountable stakeholders, and role assignment.',
+    color: '#1a73e8',
+    icon: '📋',
     risks: [
       {
-        risk: 'Hallucination',
-        kri: 'Hallucination Rate',
-        description: 'Model generates plausible but factually incorrect answers not grounded in UN documents',
-        control: 'GPT-4o-mini judge evaluates every answer against retrieved context — confidence-scored, general knowledge supplement aware',
-        component: 'hallucination_detector.py → detect_hallucination()',
-        metric: 'Hallucination Rate — Analytics tab',
+        risk: 'Cost Overrun',
+        kri: 'Cost Per Query / Cache Hit Rate',
+        control: 'Redis semantic cache at 0.95 cosine similarity threshold — repeated queries served from cache within 1hr TTL, reducing API spend.',
+        component: 'semantic_cache.py → get_cached_response()',
+        metric: 'Cost Per Query + Cache Hit Rate — Analytics Tab',
       },
       {
-        risk: 'Domain Drift',
-        kri: 'Source Citation Rate',
-        description: 'Generic base model lacks UN-specific terminology, policy nuance, and document knowledge',
-        control: 'Fine-tuned GPT-4o-mini on 100 UN governance QA pairs — domain-adapted responses with policy terminology',
-        component: 'fine_tuner.py → ft:gpt-4o-mini-2024-07-18:truos',
-        metric: 'Top Cited Documents — Analytics tab',
+        risk: 'No Accountability',
+        kri: 'Per-user Audit Coverage',
+        control: 'Per-user metrics tracked in Redis — query count, hallucination rate, style distribution, last active timestamp.',
+        component: 'metrics_tracker.py → track_user_query()',
+        metric: 'User Activity Table — Analytics Tab',
+      },
+      {
+        risk: 'Undefined Success Metrics',
+        kri: 'KPI Coverage',
+        control: 'Analytics tab tracks 15+ KPIs: hallucination rate, cache hit rate, PII detection rate, latency percentiles, cost per query.',
+        component: 'AnalyticsTab.js + semantic_cache.py',
+        metric: 'Full Metrics Dashboard — Analytics Tab',
+      },
+    ]
+  },
+  {
+    step: 3,
+    name: 'Solution Assessment',
+    description: 'Evaluate technical architecture options including model selection, retrieval strategy, and deployment topology.',
+    color: '#7b61ff',
+    icon: '🏗️',
+    risks: [
+      {
+        risk: 'Wrong Model Selection',
+        kri: 'Hallucination Rate / Domain Accuracy',
+        control: 'Fine-tuned GPT-4o-mini on 100 UN governance QA pairs — domain-adapted responses with policy-specific terminology.',
+        component: 'fine_tuner.py → ft:gpt-4o-mini-2024-07-18:truos::DHxtzUS8',
+        metric: 'Hallucination Rate — Analytics Tab',
+      },
+      {
+        risk: 'Poor Retrieval Architecture',
+        kri: 'Retrieval Relevance Score',
+        control: 'Hybrid BM25 + kNN vector search (1536-dim OpenAI embeddings) over 2,059 document chunks for maximum recall.',
+        component: 'elastic_retriever.py → hybrid_search()',
+        metric: 'Source Citations Per Query — Analytics Tab',
       },
       {
         risk: 'Query Misclassification',
         kri: 'Style Detection Accuracy',
-        description: 'Wrong response style applied — factual prompt on a risk assessment query produces inferior output',
-        control: 'Single LLM classifier call simultaneously detects meta/injection/style — context-aware, replaces 3 separate calls',
+        control: 'Single LLM classifier simultaneously detects meta/injection/style — context-aware, replaces 3 separate calls.',
         component: 'query_classifier.py → classify_query()',
-        metric: 'Style Distribution — Analytics tab',
+        metric: 'Style Distribution — Analytics Tab',
       },
     ]
   },
   {
-    category: 'Retrieval Risks',
-    color: '#7b61ff',
-    icon: '🔍',
+    step: 4,
+    name: 'Data Source Review',
+    description: 'Determine data sources including UN ODS file system, document repositories, and external knowledge bases.',
+    color: '#f9ab00',
+    icon: '📁',
     risks: [
       {
-        risk: 'Poor Retrieval Quality',
-        kri: 'Retrieval Relevance Score',
-        description: 'Keyword-only search misses semantically relevant document chunks — wrong context passed to LLM',
-        control: 'Hybrid search — BM25 keyword + kNN vector search (1536-dim OpenAI embeddings) combined for maximum recall',
-        component: 'elastic_retriever.py → hybrid_search()',
-        metric: 'Source citations per query — Analytics tab',
+        risk: 'Stale or Incomplete Data',
+        kri: 'Index Freshness / Document Count',
+        control: 'Elasticsearch index with 2,059 chunks from 9 UN governance documents — full re-indexing on document updates.',
+        component: 'elastic_indexer.py → index_documents()',
+        metric: 'Indexed Documents Count — Analytics Tab',
       },
       {
         risk: 'Out-of-corpus Queries',
         kri: 'General Knowledge Supplement Rate',
-        description: 'Questions outside the 9 UN documents return empty context — risk of fabricated answers',
-        control: 'Prompts explicitly supplement with verified general knowledge and clearly label source distinction',
-        component: 'prompt_library.py → all 5 templates',
-        metric: 'Hallucination Rate — Analytics tab',
+        control: 'Prompts explicitly supplement with verified general AI governance knowledge when UN documents lack coverage.',
+        component: 'prompt_library.py → all 5 prompt templates',
+        metric: 'Hallucination Rate — Analytics Tab',
       },
       {
-        risk: 'Stale Embeddings',
-        kri: 'Index Freshness',
-        description: 'Elasticsearch index built with old embedding model — vector dimensions mismatch after model change',
-        control: 'Full re-indexing required on embedding model change — 2059 chunks with text-embedding-3-small (1536 dims)',
-        component: 'elastic_indexer.py → index_documents()',
-        metric: 'Indexed Documents — Analytics tab',
+        risk: 'Data Licensing Risk',
+        kri: 'Document Source Traceability',
+        control: 'All 9 source documents are official UN publications — tracked and cited per response with document ID.',
+        component: 'elastic_retriever.py → source metadata',
+        metric: 'Top Cited Documents — Analytics Tab',
       },
     ]
   },
   {
-    category: 'Operational Risks',
+    step: 5,
+    name: 'Data Management',
+    description: 'API access configuration, data staging, embedding pipeline, and vector store management.',
     color: '#1e8e3e',
     icon: '⚙️',
     risks: [
       {
-        risk: 'Cost Overrun',
-        kri: 'Cache Hit Rate / Cost Per Query',
-        description: 'Repeated identical queries consuming unnecessary OpenAI API credits',
-        control: 'Redis semantic cache — cosine similarity at 0.95 threshold serves cached responses within 1hr TTL',
-        component: 'semantic_cache.py → get_cached_response()',
-        metric: 'Cache Hit Rate + Cost Per Query — Analytics tab',
+        risk: 'PII in Data Pipeline',
+        kri: 'PII Detection Rate',
+        control: 'Azure Language Services detects and redacts PII before query reaches any LLM — entity types tracked per session.',
+        component: 'security.py → detect_pii() / anonymize_pii()',
+        metric: 'PII Detection Rate — Analytics Tab',
       },
+      {
+        risk: 'Embedding Model Drift',
+        kri: 'Vector Dimension Consistency',
+        control: 'Fixed embedding model (text-embedding-3-small, 1536 dims) — version-locked to prevent index-query mismatch.',
+        component: 'elastic_indexer.py + elastic_retriever.py',
+        metric: 'Indexed Documents — Analytics Tab',
+      },
+      {
+        risk: 'Cache Poisoning',
+        kri: 'Cache Integrity Rate',
+        control: 'Redis semantic cache keyed by query hash + prompt_type + topic — separate namespaces prevent cross-contamination.',
+        component: 'semantic_cache.py → store_in_cache()',
+        metric: 'Cache Hit Rate — Analytics Tab',
+      },
+    ]
+  },
+  {
+    step: 6,
+    name: 'Architecture & Information Security Review',
+    description: 'Security assessment, information security certification, and architecture review against UN security standards.',
+    color: '#d93025',
+    icon: '🔐',
+    risks: [
+      {
+        risk: 'Prompt Injection',
+        kri: 'Injection Block Rate',
+        control: 'LLM-based injection detector — GPT-4o-mini evaluates full query context with confidence scoring, not brittle pattern lists.',
+        component: 'query_classifier.py → classify_query() → is_injection',
+        metric: 'Security Block Rate — Security Tab',
+      },
+      {
+        risk: 'Credential Exposure',
+        kri: 'Secret Management Coverage',
+        control: 'All secrets stored in Azure Key Vault (gov-demo-kv-truos) — Container App uses managed identity, no plaintext env vars.',
+        component: 'Azure Key Vault + Container App Managed Identity',
+        metric: 'Key Vault Secret Count — Azure Portal',
+      },
+      {
+        risk: 'Unauthorized API Access',
+        kri: 'CORS Policy Coverage',
+        control: 'CORS restricted to approved origins only — localhost:3000, proud-smoke SWA, ai.truos.io.',
+        component: 'api.py → CORSMiddleware',
+        metric: 'CORS Violations — Container App Logs',
+      },
+      {
+        risk: 'Token Flooding / DoS',
+        kri: 'Rate Limit Hit Rate',
+        control: 'Per-user rate limiting — 10 requests/minute tracked in Redis, independent per authenticated user ID.',
+        component: 'security.py → check_rate_limit()',
+        metric: 'Rate Limit Hits — Security Tab',
+      },
+    ]
+  },
+  {
+    step: 7,
+    name: 'Infrastructure Optimization',
+    description: 'Right-sizing compute, scaling configuration, Redis performance tuning, and cost optimization.',
+    color: '#e8710a',
+    icon: '📡',
+    risks: [
+      {
+        risk: 'Infrastructure Cost Overrun',
+        kri: 'Redis Memory Usage / Cache Hit Rate',
+        control: 'Redis semantic cache reduces LLM calls — keyspace hit ratio, memory usage, and uptime tracked in Analytics.',
+        component: 'semantic_cache.py → get_redis_infrastructure_metrics()',
+        metric: 'Redis Memory + Hit Ratio — Analytics Tab',
+      },
+      {
+        risk: 'Container Downtime',
+        kri: 'Health Check Status',
+        control: 'Azure Container Apps health probes — liveness, readiness, and startup probes on port 80 with automatic restart.',
+        component: '/health endpoint + Container App probes',
+        metric: 'Health Status — /health endpoint',
+      },
+      {
+        risk: 'Cold Start Latency',
+        kri: 'P95 Latency',
+        control: 'Minimum 1 replica always running — no scale-to-zero, warm instance ready for immediate response.',
+        component: 'Container App scale config → minReplicas: 1',
+        metric: 'P95 Latency — Analytics Tab',
+      },
+    ]
+  },
+  {
+    step: 8,
+    name: 'Solution Development',
+    description: 'Iterative development, fine-tuning, evaluation, and user acceptance testing of the AI solution.',
+    color: '#5f6368',
+    icon: '💻',
+    risks: [
+      {
+        risk: 'Model Quality Regression',
+        kri: 'Eval Coverage / Hallucination Rate',
+        control: 'Built-in Eval Runner — bulk test suite with hallucination scoring, security checks, and KPI summary on each run.',
+        component: 'EvalTab.js + tests/bulk_test.py',
+        metric: 'Evals Tab — Hallucination + Quality Scores',
+      },
+      {
+        risk: 'User Feedback Loop Gap',
+        kri: 'Feedback Volume / Thumbs Down Rate',
+        control: 'Per-response thumbs up/down with optional comment — negative feedback flagged for fine-tune review and JSONL export.',
+        component: 'QueryTab.js → handleFeedback() + /feedback endpoint',
+        metric: 'Feedback Panel — Admin Tab',
+      },
+      {
+        risk: 'CI/CD Deployment Risk',
+        kri: 'Deployment Success Rate',
+        control: 'GitHub Actions CI/CD — automated test → build → deploy pipeline on every push to main with rollback capability.',
+        component: '.github/workflows/ci.yml',
+        metric: 'GitHub Actions — Workflow Runs',
+      },
+    ]
+  },
+  {
+    step: 9,
+    name: 'Monitoring',
+    description: 'Ongoing governance, annual compliance certification, audit trail maintenance, and performance monitoring.',
+    color: '#009edb',
+    icon: '📊',
+    risks: [
       {
         risk: 'Lack of Observability',
         kri: 'LLM Trace Coverage',
-        description: 'No visibility into model behavior, latency distribution, costs, or failure modes in production',
-        control: 'LangSmith traces every LLM call — latency percentiles, token usage, cost, model distribution, error rate',
-        component: 'LangSmith + metrics_tracker.py',
-        metric: 'LLM Observability — Analytics tab',
+        control: 'LangSmith traces every LLM call — latency percentiles, token usage, cost per query, model distribution, error rate.',
+        component: 'LangSmith + LANGCHAIN_TRACING_V2=true',
+        metric: 'LLM Observability — Analytics Tab',
       },
       {
         risk: 'No Compliance Audit Trail',
         kri: 'Query Log Completeness',
-        description: 'Unable to reconstruct what was asked, retrieved, and answered for regulatory compliance',
-        control: 'Redis logs every query with style, sources, hallucination score, cache hit, latency, user ID',
-        component: 'metrics_tracker.py → track_query() + track_user_query()',
-        metric: 'Full metrics — Analytics tab',
+        control: 'Redis logs every query with style, sources, hallucination score, cache hit, latency, user ID — 1000 query rolling window.',
+        component: 'metrics_tracker.py → track_query()',
+        metric: 'Full Metrics Dashboard — Analytics Tab',
       },
       {
-        risk: 'Eval Blindness',
-        kri: 'Eval Coverage',
-        description: 'No systematic way to test system quality after changes to prompts, models, or documents',
-        control: 'Built-in Eval Runner — upload prompt list, auto-evaluates hallucination, security, response quality with KPI summary',
-        component: 'EvalTab.js → runEvals()',
-        metric: 'Evals tab',
+        risk: 'Access Control Drift',
+        kri: 'Pending User Rate',
+        control: 'Admin approval gate — all new users pending by default, admin approves/revokes from Admin tab with full audit log.',
+        component: 'AdminTab.js + /auth/approve + /auth/revoke',
+        metric: 'User Access Panel — Admin Tab',
+      },
+      {
+        risk: 'Annual Certification Gap',
+        kri: 'Governance KPI Completeness',
+        control: 'All 9 governance steps tracked with risk, control, KRI, and metric — exportable for annual compliance reporting.',
+        component: 'ResponsibleAITab.js — this view',
+        metric: 'Full Governance Report — This Tab',
       },
     ]
   },
 ];
 
 export default function ResponsibleAITab() {
-  const [activeCategory, setActiveCategory] = useState(null);
+  const [activeStep, setActiveStep] = useState(null);
   const [expandedRisk, setExpandedRisk] = useState(null);
 
-  const totalRisks = risks.reduce((sum, c) => sum + c.risks.length, 0);
+  const totalRisks = STEPS.reduce((sum, s) => sum + s.risks.length, 0);
+  const displayed = activeStep !== null ? STEPS.filter(s => s.step === activeStep) : STEPS;
 
   return (
     <div>
-      {/* Header card */}
+      {/* Header */}
       <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div className="card-title">Responsible AI Framework</div>
+        <div className="card-title">OICT AI Enablement Process — Governance Framework</div>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.6', marginBottom: '1rem' }}>
-          End-to-end risk identification and control mapping across the full AI pipeline.
-          Every risk has a corresponding technical control implemented in the system with a measurable KRI tracked in real time.
+          9-step governance framework for Generative AI applications at the UN Secretariat OICT.
+          Each step maps operational risks to implemented controls and measurable KPIs/KRIs tracked in real time.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
           {[
-            { label: 'Risk Categories', value: risks.length, color: '#d93025' },
-            { label: 'Total Risks Mapped', value: totalRisks, color: '#f9ab00' },
+            { label: 'Process Steps', value: STEPS.length, color: '#009edb' },
+            { label: 'Risks Mapped', value: totalRisks, color: '#d93025' },
             { label: 'Controls Implemented', value: totalRisks, color: '#1e8e3e' },
-            { label: 'KRIs Tracked', value: totalRisks, color: '#1a73e8' },
+            { label: 'KRIs Tracked', value: totalRisks, color: '#f9ab00' },
           ].map(stat => (
             <div key={stat.label} style={{
               padding: '0.875rem 1rem', borderRadius: '8px',
-              background: 'var(--surface-2)', border: '1px solid var(--border)',
-              textAlign: 'center'
+              background: 'var(--surface-2)', border: '1px solid var(--border)', textAlign: 'center'
             }}>
               <p style={{ fontSize: '1.75rem', fontFamily: 'Syne, sans-serif', fontWeight: '700', color: stat.color }}>{stat.value}</p>
               <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: '0.2rem' }}>{stat.label}</p>
@@ -208,124 +314,131 @@ export default function ResponsibleAITab() {
         </div>
       </div>
 
-      {/* Category filter */}
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+      {/* Step navigator */}
+      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
         <button
-          onClick={() => setActiveCategory(null)}
+          onClick={() => setActiveStep(null)}
           style={{
-            padding: '0.3rem 0.75rem', borderRadius: '20px', fontSize: '0.75rem',
-            fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit',
-            border: activeCategory === null ? '2px solid var(--primary)' : '1px solid var(--border)',
-            background: activeCategory === null ? 'var(--primary-light)' : 'var(--surface)',
-            color: activeCategory === null ? 'var(--primary)' : 'var(--text-secondary)'
-          }}>All Categories</button>
-        {risks.map(c => (
+            padding: '0.35rem 0.75rem', borderRadius: '20px', fontSize: '0.75rem',
+            fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit',
+            border: activeStep === null ? '2px solid var(--primary)' : '1px solid var(--border)',
+            background: activeStep === null ? 'var(--primary-light)' : 'var(--surface)',
+            color: activeStep === null ? 'var(--primary)' : 'var(--text-secondary)'
+          }}>All Steps</button>
+        {STEPS.map(s => (
           <button
-            key={c.category}
-            onClick={() => setActiveCategory(activeCategory === c.category ? null : c.category)}
+            key={s.step}
+            onClick={() => setActiveStep(activeStep === s.step ? null : s.step)}
             style={{
-              padding: '0.3rem 0.75rem', borderRadius: '20px', fontSize: '0.75rem',
-              fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit',
-              border: activeCategory === c.category ? `2px solid ${c.color}` : '1px solid var(--border)',
-              background: activeCategory === c.category ? `${c.color}18` : 'var(--surface)',
-              color: activeCategory === c.category ? c.color : 'var(--text-secondary)'
-            }}>{c.icon} {c.category}</button>
+              padding: '0.35rem 0.75rem', borderRadius: '20px', fontSize: '0.75rem',
+              fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit',
+              border: activeStep === s.step ? `2px solid ${s.color}` : '1px solid var(--border)',
+              background: activeStep === s.step ? `${s.color}18` : 'var(--surface)',
+              color: activeStep === s.step ? s.color : 'var(--text-secondary)'
+            }}>{s.icon} Step {s.step}</button>
         ))}
       </div>
 
-      {/* Risk cards */}
-      {risks
-        .filter(c => !activeCategory || c.category === activeCategory)
-        .map(category => (
-          <div key={category.category} style={{ marginBottom: '1.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.875rem' }}>
-              <span style={{ fontSize: '1rem' }}>{category.icon}</span>
-              <p className="section-label" style={{ margin: 0 }}>{category.category}</p>
-              <span style={{
-                fontSize: '0.68rem', padding: '0.15rem 0.5rem', borderRadius: '20px',
-                background: `${category.color}18`, color: category.color,
-                border: `1px solid ${category.color}40`, fontWeight: '600'
-              }}>{category.risks.length} risks</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
-              {category.risks.map(item => {
-                const key = `${category.category}-${item.risk}`;
-                const isExpanded = expandedRisk === key;
-                return (
-                  <div key={item.risk} style={{
-                    background: 'var(--surface)', borderRadius: '10px',
-                    border: '1px solid var(--border)', overflow: 'hidden',
-                    boxShadow: 'var(--shadow-1)',
-                    borderLeft: `4px solid ${category.color}`
-                  }}>
-                    {/* Collapsed row */}
-                    <div
-                      onClick={() => setExpandedRisk(isExpanded ? null : key)}
-                      style={{
-                        display: 'grid', gridTemplateColumns: '1fr 1fr auto',
-                        gap: '0', cursor: 'pointer'
-                      }}
-                    >
-                      {/* Risk */}
-                      <div style={{ padding: '0.875rem 1.25rem', borderRight: '1px solid var(--border)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem' }}>
-                          <span style={{ fontSize: '0.75rem' }}>⚠️</span>
-                          <p style={{ fontWeight: '600', fontSize: '0.875rem', color: 'var(--text-primary)' }}>{item.risk}</p>
-                        </div>
-                        <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{item.description}</p>
-                      </div>
-
-                      {/* Control */}
-                      <div style={{ padding: '0.875rem 1.25rem', background: 'var(--surface-2)', borderRight: '1px solid var(--border)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem' }}>
-                          <span style={{ color: 'var(--success)', fontSize: '0.85rem' }}>✓</span>
-                          <p style={{ fontWeight: '600', fontSize: '0.875rem', color: 'var(--success)' }}>Control</p>
-                        </div>
-                        <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{item.control}</p>
-                      </div>
-
-                      {/* Expand toggle */}
-                      <div style={{
-                        padding: '0.875rem 1rem', display: 'flex', alignItems: 'center',
-                        color: 'var(--text-tertiary)', fontSize: '0.8rem', background: 'var(--surface-2)'
-                      }}>
-                        {isExpanded ? '▲' : '▼'}
-                      </div>
-                    </div>
-
-                    {/* Expanded detail */}
-                    {isExpanded && (
-                      <div style={{
-                        borderTop: '1px solid var(--border)',
-                        padding: '0.875rem 1.25rem',
-                        background: `${category.color}08`,
-                        display: 'flex', gap: '2rem', flexWrap: 'wrap'
-                      }}>
-                        <div>
-                          <p style={{ fontSize: '0.68rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '0.3rem' }}>Implementation</p>
-                          <code style={{
-                            fontSize: '0.75rem', background: 'var(--primary-light)',
-                            color: 'var(--primary)', padding: '0.25rem 0.6rem',
-                            borderRadius: '4px', display: 'inline-block'
-                          }}>{item.component}</code>
-                        </div>
-                        <div>
-                          <p style={{ fontSize: '0.68rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '0.3rem' }}>KRI / Monitoring</p>
-                          <span style={{
-                            fontSize: '0.75rem', background: 'var(--success-light)',
-                            color: 'var(--success)', padding: '0.25rem 0.6rem',
-                            borderRadius: '4px', display: 'inline-block', fontWeight: '500'
-                          }}>{item.metric}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+      {/* Steps */}
+      {displayed.map(step => (
+        <div key={step.step} style={{ marginBottom: '2rem' }}>
+          {/* Step header */}
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: '1rem',
+            marginBottom: '0.875rem', padding: '1rem 1.25rem',
+            background: `${step.color}10`, borderRadius: '10px',
+            border: `1px solid ${step.color}30`
+          }}>
+            <div style={{
+              width: '2.5rem', height: '2.5rem', borderRadius: '50%',
+              background: step.color, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'Syne, sans-serif', fontWeight: '700', fontSize: '1rem',
+              flexShrink: 0
+            }}>{step.step}</div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                <span>{step.icon}</span>
+                <p style={{ fontFamily: 'Syne, sans-serif', fontWeight: '700', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                  {step.name}
+                </p>
+                <span style={{
+                  fontSize: '0.68rem', padding: '0.15rem 0.5rem', borderRadius: '20px',
+                  background: `${step.color}20`, color: step.color,
+                  border: `1px solid ${step.color}40`, fontWeight: '600'
+                }}>{step.risks.length} risks</span>
+              </div>
+              <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{step.description}</p>
             </div>
           </div>
-        ))}
+
+          {/* Risk cards */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingLeft: '0.5rem' }}>
+            {step.risks.map(item => {
+              const key = `${step.step}-${item.risk}`;
+              const isExpanded = expandedRisk === key;
+              return (
+                <div key={item.risk} style={{
+                  background: 'var(--surface)', borderRadius: '8px',
+                  border: '1px solid var(--border)', overflow: 'hidden',
+                  borderLeft: `4px solid ${step.color}`
+                }}>
+                  <div
+                    onClick={() => setExpandedRisk(isExpanded ? null : key)}
+                    style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', cursor: 'pointer' }}
+                  >
+                    {/* Risk */}
+                    <div style={{ padding: '0.75rem 1rem', borderRight: '1px solid var(--border)' }}>
+                      <p style={{ fontSize: '0.68rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>⚠️ Risk</p>
+                      <p style={{ fontWeight: '600', fontSize: '0.83rem', color: 'var(--text-primary)', marginBottom: '0.2rem' }}>{item.risk}</p>
+                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: '1.45' }}>{item.kri}</p>
+                    </div>
+
+                    {/* Control */}
+                    <div style={{ padding: '0.75rem 1rem', borderRight: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                      <p style={{ fontSize: '0.68rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--success)', marginBottom: '0.25rem' }}>✓ Control</p>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: '1.45' }}>{item.control}</p>
+                    </div>
+
+                    {/* KPI/KRI */}
+                    <div style={{ padding: '0.75rem 1rem', borderRight: '1px solid var(--border)' }}>
+                      <p style={{ fontSize: '0.68rem', fontWeight: '700', textTransform: 'uppercase', color: '#f9ab00', marginBottom: '0.25rem' }}>📊 KPI / KRI</p>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: '1.45' }}>{item.metric}</p>
+                    </div>
+
+                    {/* Expand */}
+                    <div style={{
+                      padding: '0.75rem 0.75rem', display: 'flex', alignItems: 'center',
+                      color: 'var(--text-tertiary)', fontSize: '0.75rem', background: 'var(--surface-2)'
+                    }}>
+                      {isExpanded ? '▲' : '▼'}
+                    </div>
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div style={{
+                      borderTop: '1px solid var(--border)',
+                      padding: '0.75rem 1rem',
+                      background: `${step.color}08`,
+                      display: 'flex', gap: '2rem', flexWrap: 'wrap'
+                    }}>
+                      <div>
+                        <p style={{ fontSize: '0.68rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '0.3rem' }}>Implementation</p>
+                        <code style={{
+                          fontSize: '0.75rem', background: 'var(--primary-light)',
+                          color: 'var(--primary)', padding: '0.25rem 0.6rem',
+                          borderRadius: '4px', display: 'inline-block'
+                        }}>{item.component}</code>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
