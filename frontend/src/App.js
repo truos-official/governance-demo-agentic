@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import AuthGate from './components/AuthGate';
+import FrameworkTab from './components/FrameworkTab';
 import QueryTab from './components/QueryTab';
 import AnalyticsTab from './components/AnalyticsTab';
 import SecurityTab from './components/SecurityTab';
@@ -14,35 +15,34 @@ import axios from 'axios';
 const API_URL = process.env.REACT_APP_API_URL;
 
 function AppContent({ user, profile }) {
-  const [activeTab, setActiveTab] = useState('query');
+  const [activeTab, setActiveTab] = useState('framework');
 
   const ADMIN_EMAIL = 'tristan.gitman@un.org';
-  const isAdmin = 
-  user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ||
-  profile?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const isAdmin =
+    user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ||
+    profile?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   const tabs = [
+    { id: 'framework', label: '🗺️ Framework' },
     { id: 'query', label: '🔍 Query' },
     { id: 'analytics', label: '📊 Analytics' },
     { id: 'security', label: '🔒 Security' },
     { id: 'architecture', label: '🏗️ Architecture' },
-    { id: 'responsible-ai', label: '⚖️ Responsible AI' },
-    { id: 'governance', label: '✅ Governance' },
+    { id: 'governance', label: '⚖️ Governance' },
     { id: 'evals', label: '🧪 Evals' },
-    ...(isAdmin ? [{ id: 'admin', label: '👤 Admin' }] : []),
   ];
 
-const handleLogout = async () => {
-  const isLocal = window.location.hostname === 'localhost';
-  if (isLocal) {
-    try {
-      await axios.post(`${API_URL}/auth/logout-dev?user_id=${user?.id}`);
-    } catch {}
-    window.location.reload();
-  } else {
-    window.location.href = '/.auth/logout';
-  }
-};
+  const handleLogout = async () => {
+    const isLocal = window.location.hostname === 'localhost';
+    if (isLocal) {
+      try {
+        await axios.post(`${API_URL}/auth/logout-dev?user_id=${user?.id}`);
+      } catch {}
+      window.location.reload();
+    } else {
+      window.location.href = '/.auth/logout';
+    }
+  };
 
   return (
     <div className="app">
@@ -71,6 +71,19 @@ const handleLogout = async () => {
                 {profile?.title || user?.email || ''}
               </p>
             </div>
+            {isAdmin && (
+              <button
+                onClick={() => setActiveTab('admin')}
+                style={{
+                  background: activeTab === 'admin' ? 'var(--primary-light)' : 'none',
+                  border: activeTab === 'admin' ? '1px solid var(--primary)' : '1px solid var(--border)',
+                  borderRadius: '6px', padding: '0.35rem 0.65rem', fontSize: '0.82rem',
+                  cursor: 'pointer', color: activeTab === 'admin' ? 'var(--primary)' : 'var(--text-secondary)',
+                  fontFamily: 'inherit', whiteSpace: 'nowrap'
+                }}
+                title="Admin panel"
+              >⚙️ Admin</button>
+            )}
             <button onClick={handleLogout} style={{
               background: 'none', border: '1px solid var(--border)', borderRadius: '6px',
               padding: '0.35rem 0.75rem', fontSize: '0.75rem', cursor: 'pointer',
@@ -96,6 +109,7 @@ const handleLogout = async () => {
       </header>
 
       <main className="main">
+        {activeTab === 'framework' && <FrameworkTab onTabChange={setActiveTab} />}
         {activeTab === 'query' && <QueryTab user={user} profile={profile} />}
         {activeTab === 'analytics' && <AnalyticsTab />}
         {activeTab === 'security' && <SecurityTab />}
