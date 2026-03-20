@@ -292,7 +292,7 @@ def get_metrics() -> dict:
         "cache_hit_rate": f"{(cache_hits / total * 100):.0f}%" if total > 0 else "0%",
         "hallucination_rate": f"{(hallucinations / total * 100):.0f}%" if total > 0 else "0%",
         "pii_detection_rate": f"{(pii_detected / total * 100):.0f}%" if total > 0 else "0%",
-        "security_block_rate": f"{(injection_attempts / total * 100):.0f}%" if total > 0 else "0%",
+        "security_block_rate": f"{(injection_attempts / (total + injection_attempts) * 100):.0f}%" if (total + injection_attempts) > 0 else "0%",
         "style_distribution": style_distribution,
         "top_sources": top_sources,
         "latency_p50": latency_percentiles.get("p50", "—"),
