@@ -130,7 +130,7 @@ export default function SecurityTab() {
             boxShadow: 'var(--shadow-1)'
           }}>
             <span style={{
-              color: 'var(--success)', fontSize: '1rem',
+              color: 'var(--success)',
               marginTop: '0.1rem', flexShrink: 0,
               width: '20px', height: '20px',
               display: 'flex', alignItems: 'center', justifyContent: 'center',

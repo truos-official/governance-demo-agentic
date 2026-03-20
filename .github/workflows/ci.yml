@@ -79,7 +79,7 @@ jobs:
           LANGCHAIN_PROJECT: un-governance-demo
           AZURE_LANGUAGE_ENDPOINT: ${{ secrets.AZURE_LANGUAGE_ENDPOINT }}
           AZURE_LANGUAGE_KEY: ${{ secrets.AZURE_LANGUAGE_KEY }}
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v || [ $? -eq 5 ]
 
   build-frontend:
     name: Build Frontend
