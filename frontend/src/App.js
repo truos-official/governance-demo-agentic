@@ -1,5 +1,15 @@
 // v2.1
 import React, { useState } from 'react';
+import {
+  Compass,
+  Activity,
+  Bot,
+  BarChart3,
+  ShieldCheck,
+  Network,
+  ClipboardCheck,
+  SlidersHorizontal
+} from 'lucide-react';
 import AuthGate from './components/AuthGate';
 import FrameworkTab from './components/FrameworkTab';
 import QueryTab from './components/QueryTab';
@@ -9,7 +19,6 @@ import ArchitectureTab from './components/ArchitectureTab';
 import ResponsibleAITab from './components/ResponsibleAITab';
 import EvalTab from './components/EvalTab';
 import AdminTab from './components/AdminTab';
-import GovernanceTab from './components/GovernanceTab';
 import './App.css';
 import axios from 'axios';
 
@@ -23,16 +32,6 @@ function AppContent({ user, profile }) {
     user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ||
     profile?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
-  const tabs = [
-    { id: 'framework', label: '🗺️ Framework' },
-    { id: 'query', label: '🔍 Query' },
-    { id: 'analytics', label: '📊 Analytics' },
-    { id: 'security', label: '🔒 Security' },
-    { id: 'architecture', label: '🏗️ Architecture' },
-    { id: 'governance', label: '⚖️ Governance' },
-    { id: 'evals', label: '🧪 Evals' },
-  ];
-
   const handleLogout = async () => {
     const isLocal = window.location.hostname === 'localhost';
     if (isLocal) {
@@ -45,9 +44,47 @@ function AppContent({ user, profile }) {
     }
   };
 
+  const govTabs = [
+    { id: 'framework', label: 'Framework', Icon: Compass },
+    { id: 'governance', label: 'Monitoring', Icon: Activity },
+  ];
+
+  const solutionTabs = [
+    { id: 'agent', label: 'Agent', Icon: Bot },
+    { id: 'analytics', label: 'Analytics', Icon: BarChart3 },
+    { id: 'security', label: 'Security', Icon: ShieldCheck },
+    { id: 'architecture', label: 'Architecture', Icon: Network },
+    { id: 'evals', label: 'Evals', Icon: ClipboardCheck },
+  ];
+
+  const govColor = '#009edb';
+  const solColor = '#1a73e8';
+
+  const tabBtn = (tab, activeColor, isActive) => (
+    <button
+      key={tab.id}
+      onClick={() => setActiveTab(tab.id)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '0.35rem',
+        padding: '0.55rem 0.875rem', fontSize: '0.8rem',
+        fontWeight: isActive ? '600' : '400',
+        color: isActive ? activeColor : 'var(--text-secondary)',
+        background: 'none', border: 'none',
+        borderBottom: isActive ? `2px solid ${activeColor}` : '2px solid transparent',
+        cursor: 'pointer', fontFamily: 'inherit',
+        transition: 'all 0.15s', whiteSpace: 'nowrap',
+        marginBottom: '-1px'
+      }}
+    >
+      <tab.Icon size={15} strokeWidth={1.75} color={isActive ? activeColor : 'var(--text-tertiary)'} />
+      {tab.label}
+    </button>
+  );
+
   return (
     <div className="app">
       <header className="header" style={{ padding: 0 }}>
+
         {/* Top row — branding + user */}
         <div style={{
           padding: '0 2rem',
@@ -76,14 +113,18 @@ function AppContent({ user, profile }) {
               <button
                 onClick={() => setActiveTab('admin')}
                 style={{
-                  background: activeTab === 'admin' ? 'var(--primary-light)' : 'none',
-                  border: activeTab === 'admin' ? '1px solid var(--primary)' : '1px solid var(--border)',
-                  borderRadius: '6px', padding: '0.35rem 0.65rem', fontSize: '0.82rem',
-                  cursor: 'pointer', color: activeTab === 'admin' ? 'var(--primary)' : 'var(--text-secondary)',
+                  display: 'flex', alignItems: 'center', gap: '0.35rem',
+                  background: activeTab === 'admin' ? 'var(--surface-2)' : 'none',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px', padding: '0.35rem 0.65rem', fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  color: activeTab === 'admin' ? 'var(--text-primary)' : 'var(--text-secondary)',
                   fontFamily: 'inherit', whiteSpace: 'nowrap'
                 }}
-                title="Admin panel"
-              >⚙️ Admin</button>
+              >
+                <SlidersHorizontal size={13} strokeWidth={1.75} />
+                Admin
+              </button>
             )}
             <button onClick={handleLogout} style={{
               background: 'none', border: '1px solid var(--border)', borderRadius: '6px',
@@ -93,30 +134,47 @@ function AppContent({ user, profile }) {
           </div>
         </div>
 
-        {/* Bottom row — tabs */}
-        <div style={{ padding: '0 2rem' }}>
-          <nav className="tabs">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                className={`tab ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
+        {/* Bottom row — two-zone navigation */}
+        <div style={{
+          display: 'flex', alignItems: 'stretch',
+          borderTop: '1px solid var(--border)',
+          background: 'var(--surface)', minHeight: '44px'
+        }}>
+
+          {/* ZONE 1 — Governance Framework */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '0 1.5rem 0 2rem' }}>
+            <span style={{ fontSize: '0.58rem', fontWeight: '700', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em', paddingBottom: '0.2rem', paddingLeft: '0.1rem' }}>
+              Governance Framework
+            </span>
+            <div style={{ display: 'flex', gap: '0', alignItems: 'flex-end' }}>
+              {govTabs.map(tab => tabBtn(tab, govColor, activeTab === tab.id))}
+            </div>
+          </div>
+
+          {/* Vertical divider */}
+          <div style={{ width: '1px', background: 'var(--border)', margin: '8px 0', alignSelf: 'stretch', flexShrink: 0 }} />
+
+          {/* ZONE 2 — Live Agentic Solution */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '0 2rem 0 1.5rem', flex: 1 }}>
+            <span style={{ fontSize: '0.58rem', fontWeight: '700', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em', paddingBottom: '0.2rem', paddingLeft: '0.1rem' }}>
+              Live Agentic Solution
+            </span>
+            <div style={{ display: 'flex', gap: '0', alignItems: 'flex-end' }}>
+              {solutionTabs.map(tab => tabBtn(tab, solColor, activeTab === tab.id))}
+            </div>
+          </div>
+
         </div>
+
       </header>
 
       <main className="main">
         {activeTab === 'framework' && <FrameworkTab onTabChange={setActiveTab} />}
-        {activeTab === 'query' && <QueryTab user={user} profile={profile} />}
+        {activeTab === 'governance' && <ResponsibleAITab />}
+        {activeTab === 'agent' && <QueryTab user={user} profile={profile} />}
         {activeTab === 'analytics' && <AnalyticsTab />}
         {activeTab === 'security' && <SecurityTab />}
         {activeTab === 'architecture' && <ArchitectureTab />}
-        {activeTab === 'responsible-ai' && <ResponsibleAITab />}
-        {activeTab === 'governance' && <GovernanceTab />}
         {activeTab === 'evals' && <EvalTab />}
         {activeTab === 'admin' && isAdmin && <AdminTab currentUserId={user?.id} />}
       </main>

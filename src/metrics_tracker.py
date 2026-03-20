@@ -257,9 +257,10 @@ def get_metrics() -> dict:
         for key in client.scan_iter("metrics:source:*"):
             source = key.replace("metrics:source:", "")
             top_sources[source] = int(client.get(key) or 0)
+        total_feedback = int(client.scard("feedback:all") or 0)
     except Exception as e:
         print(f"Redis metrics error: {e}")
-        total = cache_hits = hallucinations = pii_detected = injection_attempts = 0
+        total = cache_hits = hallucinations = pii_detected = injection_attempts = total_feedback = 0
         style_distribution = {}
         top_sources = {}
 
@@ -320,6 +321,27 @@ def get_metrics() -> dict:
         "pii_entity_breakdown": pii_entities,
         "user_activity": user_activity,
         "total_registered_users": len(user_activity),
+        "total_feedback": total_feedback,
+        "active_styles": len([v for v in style_distribution.values() if v > 0]),
+        "active_sources": len(top_sources),
+        "active_risk_categories": 3,
+        "reviewed_providers": 4,
+        "model_components": 3,
+        "reviewed_models": 3,
+        "azure_services": 7,
+        "zdr_providers": 1,
+        "swappable_components": 3,
+        "documented_apis": 5,
+        "classified_sources": 9,
+        "cleared_sources": 9,
+        "azure_regions": 1,
+        "vault_secrets": 12,
+        "cors_origins": 3,
+        "active_security_controls": 5,
+        "max_replicas": 3,
+        "health_probe_count": 3,
+        "health_indicators": 2,
+        "pipeline_stages": 3,
     }
 
 def get_security_events() -> dict:
