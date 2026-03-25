@@ -291,10 +291,21 @@ def revoke_user(user_id: str, revoked_by: str = "admin"):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/auth/validate/{user_id}")
-def validate_user(user_id: str):
+def validate_user(user_id: str, email: str = ""):
     try:
         client = get_redis_client()
         raw = client.get(f"user:{user_id}:profile")
+
+        if not raw and email:
+            all_ids = client.smembers("users:all")
+            for uid in all_ids:
+                candidate = client.get(f"user:{uid}:profile")
+                if candidate:
+                    p = json.loads(candidate)
+                    if p.get("email", "").lower() == email.lower():
+                        raw = candidate
+                        break
+
         if not raw:
             return {"status": "unregistered"}
         profile = json.loads(raw)

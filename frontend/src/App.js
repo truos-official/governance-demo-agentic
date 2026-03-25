@@ -38,6 +38,7 @@ function AppContent({ user, profile }) {
       try {
         await axios.post(`${API_URL}/auth/logout-dev?user_id=${user?.id}`);
       } catch {}
+      sessionStorage.setItem('dev_logged_out', '1');
       window.location.reload();
     } else {
       window.location.href = '/.auth/logout';

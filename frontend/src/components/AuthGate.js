@@ -51,6 +51,11 @@ export default function AuthGate({ children }) {
   });
 
   useEffect(() => {
+    if (sessionStorage.getItem('dev_logged_out')) {
+      setShowForm('dev_signed_out');
+      setLoading(false);
+      return;
+    }
     fetch('/.auth/me')
       .then(res => res.json())
       .then(data => {
@@ -74,23 +79,26 @@ export default function AuthGate({ children }) {
           };
           setUser(userData);
           setForm(f => ({ ...f, full_name: userData.name, email: userData.email }));
-          checkProfile(userData.id);
+          checkProfile(userData.id, userData.email);
         } else {
-          const devUser = { id: 'dev_user', name: '', email: '', provider: 'dev' };
+          const devUser = { id: 'dev_user', name: 'Tristan Gitman', email: 'tristan.gitman@un.org', provider: 'dev' };
           setUser(devUser);
-          checkProfile(devUser.id);
+          setForm(f => ({ ...f, full_name: devUser.name, email: devUser.email }));
+          checkProfile(devUser.id, devUser.email);
         }
       })
       .catch(() => {
-        const devUser = { id: 'dev_user', name: '', email: '', provider: 'dev' };
+        const devUser = { id: 'dev_user', name: 'Tristan Gitman', email: 'tristan.gitman@un.org', provider: 'dev' };
         setUser(devUser);
-        checkProfile(devUser.id);
+        setForm(f => ({ ...f, full_name: devUser.name, email: devUser.email }));
+        checkProfile(devUser.id, devUser.email);
       });
   }, []);
 
-  const checkProfile = async (userId) => {
+  const checkProfile = async (userId, email = '') => {
     try {
-      const res = await axios.get(`${API_URL}/auth/validate/${userId}`);
+      const emailParam = email ? `?email=${encodeURIComponent(email)}` : '';
+      const res = await axios.get(`${API_URL}/auth/validate/${userId}${emailParam}`);
       const { status, profile } = res.data;
       if (status === 'approved') {
         setProfile(profile);
@@ -194,6 +202,37 @@ export default function AuthGate({ children }) {
         <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
           Your access to this system has been revoked. Please contact the administrator if you believe this is an error.
         </p>
+      </div>
+    </div>
+  );
+
+  if (showForm === 'dev_signed_out') return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--surface-2)', padding: '2rem'
+    }}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border)', boxShadow: 'var(--shadow-3)',
+        padding: '2.5rem', width: '100%', maxWidth: '400px', textAlign: 'center'
+      }}>
+        <img src="/un-emblem.png" alt="UN Emblem" style={{ height: '50px', width: 'auto', marginBottom: '1.5rem' }} />
+        <h2 style={{ fontFamily: 'Syne, sans-serif', fontSize: '1.3rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+          Responsible AI Demo
+        </h2>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.55', marginBottom: '1.75rem' }}>
+          You have been signed out.
+        </p>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            sessionStorage.removeItem('dev_logged_out');
+            window.location.reload();
+          }}
+          style={{ width: '100%', padding: '0.875rem', fontSize: '0.95rem' }}
+        >
+          Sign in
+        </button>
       </div>
     </div>
   );
