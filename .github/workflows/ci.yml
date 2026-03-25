@@ -68,6 +68,7 @@ jobs:
 
       - name: Run tests
         env:
+          PYTHONPATH: .                                          # ← ADD: fixes src/ imports
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REDIS_HOST: ${{ secrets.REDIS_HOST }}
           REDIS_PORT: ${{ secrets.REDIS_PORT }}
@@ -77,9 +78,14 @@ jobs:
           ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
           LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
           LANGCHAIN_PROJECT: un-governance-demo
+          LANGCHAIN_TRACING_V2: "false"                         # ← ADD: no live traces in CI
           AZURE_LANGUAGE_ENDPOINT: ${{ secrets.AZURE_LANGUAGE_ENDPOINT }}
           AZURE_LANGUAGE_KEY: ${{ secrets.AZURE_LANGUAGE_KEY }}
-        run: python -m pytest tests/ -v || [ $? -eq 5 ]
+          CORS_ORIGINS: "http://localhost:3000"                 # ← ADD: was missing entirely
+        run: |
+          python -m pytest tests/ -v \
+            --ignore=tests/evaluator.py \
+            --ignore=tests/report.py    # ← REPLACE the || [ $? -eq 5 ] hack
 
   build-frontend:
     name: Build Frontend
