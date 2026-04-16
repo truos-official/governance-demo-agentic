@@ -1,0 +1,1884 @@
+================================================================================
+UN SECRETARIAT AI GOVERNANCE ASSISTANT
+COMPLETE TECHNICAL HANDOFF DOCUMENT v2
+================================================================================
+Project Owner : Tristan Gitman, Head of AI Governance, UN Secretariat OICT
+Email         : tristan.gitman@un.org
+GitHub        : truos-official
+Azure Account : info@truos.io
+Document Date : March 2026
+================================================================================
+
+TABLE OF CONTENTS
+  1.  Project Overview
+  2.  Tech Stack
+  3.  Azure Resources
+  4.  Complete File Structure
+  5.  Dockerfile & Build Rules
+  6.  Redis Client — Critical Configuration
+  7.  Auth System
+  8.  All API Endpoints
+  9.  Redis Key Schema
+  10. Metrics Endpoint — Complete Return Object
+  11. Navigation Structure (App.js)
+  12. Framework Tab Architecture
+  13. 9-Step Governance Framework — Complete Data
+  14. CSS Variables
+  15. Deployment Commands
+  16. GitHub Actions CI/CD
+  17. Environment Variables Reference
+  18. Query Pipeline
+  19. staticwebapp.config.json
+  20. UN Corpus Documents
+  21. Fine-tuned Model
+  22. Admin Tab Capabilities
+  23. Responsible AI Tab (Monitoring)
+  24. Known Issues & Pending Tasks
+  25. Troubleshooting Quick Reference
+  26. Azure AD Tenant Issue (AADSTS5000225)
+  27. Credential Rotation Checklist
+
+
+================================================================================
+1. PROJECT OVERVIEW
+================================================================================
+Name    : "Agentic AI: Responsible AI Demo"
+Purpose : A responsible AI governance assistant demonstrating applied governance
+          controls on a custom RAG GenAI application. Built on 9 UN policy
+          documents. VP AI Portfolio project for UN Secretariat OICT.
+
+Live URLs
+  Frontend Primary : https://ai.truos.io
+  Frontend Alt     : https://proud-smoke-08513440f.2.azurestaticapps.net
+  Backend          : https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io
+
+Local Development
+  Frontend : http://localhost:3000
+  Backend  : http://localhost:8000
+  Path     : C:\Users\trist\OneDrive\Desktop\agentic-application
+
+GitHub    : https://github.com/truos-official/governance-demo-agentic  (public)
+
+
+================================================================================
+2. TECH STACK
+================================================================================
+
+Frontend
+  React (Create React App)
+  Axios                     HTTP client — all API calls
+  Recharts                  Charts in Analytics tab
+  SheetJS / xlsx            Spreadsheet export
+  Azure SWA built-in Auth   Microsoft AAD authentication
+  lucide-react@0.383.0      Icons (already installed)
+  Inline styles only        No external CSS library whatsoever
+  CSS variables             All theming via var(--name) — see Section 14
+
+Backend
+  FastAPI                   All endpoints in src/api.py
+  Uvicorn                   ASGI server
+  Python 3.11               Version-locked — do not upgrade without testing
+
+AI / ML
+  Primary LLM  : ft:gpt-4o-mini-2024-07-18:truos::DHxtzUS8  (fine-tuned)
+  Fallback LLM : gpt-4o-mini  (meta questions, hallucination judge, classifier)
+  Embeddings   : OpenAI text-embedding-3-small (1536 dimensions)
+  Fine-tuning  : 100 UN governance Q&A pairs in data/fine_tune_data.jsonl
+
+RAG
+  Elasticsearch  Azure Elastic Cloud — hybrid BM25 + kNN
+  Index          un_documents_index
+  Chunks         2,059 chunks from 9 UN policy PDFs
+  Retrieval      top_k=5 results from hybrid search
+
+Semantic Cache
+  Redis          Azure Cache for Redis
+  Host           governance-redis.redis.cache.windows.net
+  Port           6380  (SSL only — 6379 disabled)
+  TTL            3600s (1 hour)
+  Threshold      0.95 cosine similarity
+
+Privacy / Security
+  Azure Language Services   PII detection + anonymization
+  Region                    eastus
+  Rate limit                10 requests/minute per user_id (enforced in Redis)
+  Injection detection       LLM-based classifier (single call with style detection)
+
+Observability
+  LangSmith    All LLM calls traced — project: un-governance-demo
+  W&B          Evaluation logging (wandb/ folder)
+
+Infrastructure
+  Backend     Azure Container Apps
+  Frontend    Azure Static Web Apps
+  Registry    governancedemoacr.azurecr.io
+  Secrets     Azure Key Vault (gov-demo-kv-truos) — ALL secrets stored here
+  CDN/DNS     Squarespace CNAME → Azure SWA for ai.truos.io
+  CI/CD       GitHub Actions (.github/workflows/ci.yml)
+
+
+================================================================================
+3. AZURE RESOURCES
+================================================================================
+
+Subscription ID  : a022ff24-58dd-48b0-a8b5-0791dbdb06e6
+Resource Group   : rg-governance-demo  (eastus)
+Tenant ID        : 4db4e22f-83ed-4093-8d8a-c73b1e559459
+                   *** SEE SECTION 26 — THIS TENANT IS CURRENTLY BLOCKED ***
+
+Container App    : governance-backend
+  Current Image  : governancedemoacr.azurecr.io/governance-backend:v5
+  Next Version   : v6
+  CPU            : 0.5 vCPU
+  RAM            : 1Gi
+  Min Replicas   : 1  (always warm — no scale-to-zero, no cold start)
+  Max Replicas   : 3
+  Identity       : System-assigned managed identity
+  principalId    : af88fe79-3051-4ca1-beff-6ceb87929239
+  Env Vars       : ALL reference Key Vault secrets via secretref= notation
+  Health Probes  : Liveness + Readiness + Startup  (port 80)
+  Ingress        : External, port 80, HTTPS enforced
+
+Static Web App   : governance-frontend
+  Region         : East US 2
+  Auth Provider  : Azure AD (Microsoft accounts only)
+  Custom Domain  : ai.truos.io
+  Config File    : frontend/staticwebapp.config.json  (.json extension required)
+  Routes         : All routes require "authenticated" SWA built-in role
+
+Container Registry  : governancedemoacr.azurecr.io
+  Login           : az acr login --name governancedemoacr
+
+Redis            : governance-redis.redis.cache.windows.net
+  Port           : 6380  (SSL/TLS only)
+  Password       : stored in Key Vault as "redis-password"
+  SSL flag       : ssl=True, ssl_cert_reqs=None  (Python None — NOT string "none")
+  Username       : DO NOT SET — Azure Redis rejects username parameter
+
+Elasticsearch    : https://my-elasticsearch-project-f2452a.es.eastus2.azure.elastic.cloud:443
+  API Key        : stored in Key Vault as "elastic-api-key"
+
+Key Vault        : gov-demo-kv-truos.vault.azure.net
+  Access model   : RBAC  (not legacy access policy)
+  Role assigned  : Container App managed identity → "Key Vault Secrets User"
+  Secrets (12)   :
+    openai-api-key
+    redis-host
+    redis-port
+    redis-password
+    redis-ssl
+    elastic-endpoint
+    elastic-api-key
+    langchain-api-key
+    langchain-project
+    azure-language-endpoint
+    azure-language-key
+    cors-origins
+
+  Retrieve any secret:
+    az keyvault secret show --vault-name gov-demo-kv-truos --name SECRET-NAME --query value -o tsv
+
+Azure Language   : governance-language  (eastus)
+  Endpoint       : https://eastus.api.cognitive.microsoft.com/
+  Key            : stored in Key Vault as "azure-language-key"
+
+
+================================================================================
+4. COMPLETE FILE STRUCTURE
+================================================================================
+
+agentic-application/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                     # GitHub Actions pipeline
+│
+├── data/
+│   ├── chroma_db/                     # Legacy vector store — NOT used in production
+│   ├── pdfs/                          # 9 UN source documents (PDF)
+│   ├── processed/                     # Extracted .txt versions of PDFs
+│   ├── document_titles.json           # Human-readable document name mapping
+│   ├── fine_tune_data.jsonl           # 100 Q&A pairs used for GPT fine-tuning
+│   └── topics.json                    # Topic classification labels
+│
+├── frontend/
+│   ├── build/                         # Production build output (gitignored)
+│   ├── public/
+│   │   ├── index.html
+│   │   ├── un-emblem.png              # UN logo — used in header and auth screens
+│   │   ├── 403.html                   # Custom 403 page (SWA responseOverrides)
+│   │   └── favicon.ico
+│   ├── src/
+│   │   ├── App.js                     # Main app — navigation, auth, tab routing
+│   │   ├── App.css                    # Global styles + all CSS variables
+│   │   ├── index.js
+│   │   ├── index.css
+│   │   └── components/
+│   │       ├── FrameworkTab.js        # 3-level governance playbook [IN PROGRESS]
+│   │       ├── QueryTab.js            # RAG query interface  (nav label: "Agent")
+│   │       ├── AnalyticsTab.js        # Metrics dashboard
+│   │       ├── SecurityTab.js         # Security events monitor
+│   │       ├── ArchitectureTab.js     # System architecture documentation
+│   │       ├── ResponsibleAITab.js    # Governance framework (nav label: "Monitoring")
+│   │       ├── EvalTab.js             # Bulk evaluation runner
+│   │       ├── AdminTab.js            # User management + feedback panel
+│   │       └── AuthGate.js            # Auth flow controller
+│   ├── .env                           # REACT_APP_API_URL=http://localhost:8000
+│   ├── .env.production                # REACT_APP_API_URL=https://governance-backend...
+│   ├── staticwebapp.config.json       # SWA routes + auth config  (.json extension required)
+│   ├── package.json
+│   ├── Dockerfile                     # nginx container — NOT used (SWA deploys build/)
+│   └── nginx.conf
+│
+├── src/
+│   ├── api.py                         # ALL FastAPI endpoints
+│   ├── semantic_cache.py              # Redis semantic cache + get_metrics() function
+│   ├── metrics_tracker.py             # get_redis_client() + per-query tracking
+│   ├── rag_chain.py                   # RAG pipeline builder (chain construction)
+│   ├── elastic_retriever.py           # Elasticsearch hybrid BM25+kNN search
+│   ├── elastic_indexer.py             # Document chunking + indexing pipeline
+│   ├── hallucination_detector.py      # GPT-4o-mini judge — evaluates every response
+│   ├── query_classifier.py            # Single LLM call: style + injection + meta
+│   ├── security.py                    # Azure Language PII detection + rate limiting
+│   ├── prompt_library.py              # 5 prompt templates by style
+│   ├── fine_tuner.py
+│   ├── fine_tune_data_generator.py
+│   ├── fine_tune_evaluator.py
+│   ├── pdf_processor.py
+│   ├── topic_classifier.py
+│   ├── topic_extractor.py
+│   ├── rag_retriever.py
+│   ├── dashboard.py
+│   ├── hello.py
+│   └── __init__.py
+│
+├── tests/
+│   ├── data/
+│   │   └── test_cases.json            # Test cases for bulk evaluation
+│   ├── reports/
+│   │   └── report_20260314_181439.json
+│   ├── bulk_test.py                   # Main test runner (has test_ functions)
+│   ├── evaluator.py                   # HELPER MODULE — no test_ functions
+│   └── report.py                      # HELPER MODULE — no test_ functions
+│   NOTE: evaluator.py and report.py cause pytest exit code 5
+│         Fix: add --ignore flags in ci.yml
+│
+├── wandb/                             # Weights & Biases run logs
+├── venv/                              # Python 3.11 virtual environment
+├── .env                               # Backend env vars — GITIGNORED
+├── Dockerfile                         # Backend container — python:3.11-slim
+├── docker-compose.yml                 # Local multi-service setup
+├── requirements.txt                   # Dev + test dependencies
+├── requirements.prod.txt              # Production dependencies (leaner)
+├── evaluation_results.json
+└── README.md                          # Fully rewritten professional README
+
+
+================================================================================
+5. DOCKERFILE & BUILD RULES
+================================================================================
+
+Backend Dockerfile (project root):
+  FROM python:3.11-slim
+  WORKDIR /app
+  RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
+  COPY requirements.prod.txt .
+  RUN pip install --no-cache-dir -r requirements.prod.txt
+  COPY src/ ./src/
+  COPY data/ ./data/
+  EXPOSE 80
+  CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "80"]
+
+CRITICAL BUILD RULES:
+  1. ALWAYS --platform linux/amd64
+     Azure Container Apps runs on amd64. Building on Mac M1/M2 without this flag
+     produces arm64 image that silently fails on Azure.
+
+  2. ALWAYS --no-cache when Python code changed
+     Docker layer caching can serve stale src/ files. Use --no-cache to guarantee
+     all code changes are included.
+
+  3. INCREMENT version tag
+     Current: v5. Next: v6. Never reuse a tag — Azure may not pull a re-pushed tag.
+
+  4. Use requirements.prod.txt for production builds
+     requirements.txt includes dev/test tools (pytest, etc.) not needed in container.
+
+Full build + push + deploy sequence:
+  docker build --no-cache --platform linux/amd64 \
+    -t governancedemoacr.azurecr.io/governance-backend:v6 .
+  az acr login --name governancedemoacr
+  docker push governancedemoacr.azurecr.io/governance-backend:v6
+  az containerapp update \
+    --name governance-backend \
+    --resource-group rg-governance-demo \
+    --image governancedemoacr.azurecr.io/governance-backend:v6
+
+
+================================================================================
+6. REDIS CLIENT — CRITICAL CONFIGURATION
+================================================================================
+
+Location: src/metrics_tracker.py  AND  src/semantic_cache.py  (identical in both)
+
+def get_redis_client():
+    REDIS_SSL = os.getenv("REDIS_SSL", "true").lower() == "true"
+    kwargs = {
+        "host":                    os.getenv("REDIS_HOST"),
+        "port":                    int(os.getenv("REDIS_PORT", 6380)),
+        "password":                os.getenv("REDIS_PASSWORD"),
+        "decode_responses":        True,
+        "socket_timeout":          int(os.getenv("REDIS_SOCKET_TIMEOUT", 30)),
+        "socket_connect_timeout":  int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", 30)),
+    }
+    if REDIS_SSL:
+        kwargs["ssl"]           = True
+        kwargs["ssl_cert_reqs"] = None   # <<< MUST be Python None — NOT string "none"
+    return redis.Redis(**kwargs)
+
+NUANCE 1 — ssl_cert_reqs must be Python None
+  Wrong:  kwargs["ssl_cert_reqs"] = "none"    → causes auth failure / SSL handshake error
+  Right:  kwargs["ssl_cert_reqs"] = None      → disables cert validation (Azure uses self-signed)
+
+NUANCE 2 — No username parameter
+  Newer versions of redis-py automatically send username="default"
+  Azure Cache for Redis rejects any username parameter → "invalid username-password pair"
+  Solution: ensure username is NOT in kwargs dict at all
+
+NUANCE 3 — Port 6380 only
+  Port 6379 (non-SSL) is disabled on Azure Redis by default
+  Always use 6380
+
+NUANCE 4 — REDIS_SSL env var is a string
+  os.getenv("REDIS_SSL") returns the string "true" not Python True
+  Must evaluate: .lower() == "true"
+
+
+================================================================================
+7. AUTH SYSTEM
+================================================================================
+
+Infrastructure layer: Azure SWA handles Microsoft AAD authentication.
+All routes in staticwebapp.config.json require "authenticated" role.
+Unauthenticated requests → SWA redirects to /.auth/login/aad automatically.
+
+AuthGate.js flow on mount:
+  1. GET /.auth/me
+     → returns {clientPrincipal: {userId, identityProvider, userDetails, claims}}
+     → null clientPrincipal = not authenticated (dev mode)
+
+  2. Extract email from claims array — checked in this order:
+     "emails"
+     "email"
+     "preferred_username"
+     "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+
+  3. Extract name from claims array — checked in order:
+     "name"
+     "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+
+  4. GET /auth/validate/{userId}
+     → {status: "unregistered"|"pending"|"approved"|"revoked", profile: {...}|null}
+
+  5. Route based on status:
+     approved     → render <App /> tabs
+     pending      → "Access Pending Approval" holding screen
+     revoked      → "Access Revoked" holding screen
+     unregistered → registration form (full_name, email, title, company, country)
+
+Registration:
+  POST /register
+  tristan.gitman@un.org → auto-approved immediately
+  All other emails → status = "pending" → admin must approve
+
+Admin approval:
+  POST /auth/approve?user_id=X&approved_by=Y
+  POST /auth/revoke?user_id=X&revoked_by=Y
+  Both available in Admin tab (visible only to tristan.gitman@un.org)
+
+Dev mode (localhost):
+  /.auth/me returns {"clientPrincipal": null}
+  AuthGate sets devUser = {id: "dev_user", name: "Dev User", email: "", provider: "dev"}
+  Dev user has empty email → isAdmin = false
+  To test admin locally: manually set dev_user profile status to "approved" in Redis
+    redis-cli -h governance-redis... -p 6380 -a PASSWORD --tls
+    SET user:dev_user:profile '{"status":"approved","email":"tristan.gitman@un.org",...}'
+
+Sign out:
+  localhost  → POST /auth/logout-dev  (deletes Redis profile) + window.location.reload()
+  production → window.location.href = "/.auth/logout"
+
+isAdmin check (App.js):
+  const isAdmin =
+    profile?.email?.toLowerCase() === "tristan.gitman@un.org" ||
+    user?.email?.toLowerCase() === "tristan.gitman@un.org";
+
+
+================================================================================
+8. ALL API ENDPOINTS
+================================================================================
+
+Base URL local      : http://localhost:8000
+Base URL production : https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io
+All API calls from frontend use: const API_URL = process.env.REACT_APP_API_URL
+
+────────────────────────────────────────────────────────
+GET /health
+  Response: {"status": "healthy"|"degraded", "redis": "connected"|error_msg}
+  Used by: Container Apps health probes, Framework tab Live Governance Pulse
+
+────────────────────────────────────────────────────────
+POST /query
+  Body:     {question: str, user_id: str = "anonymous"}
+  Response: {answer, hallucination_score, is_hallucination, detected_style,
+             sources, cache_hit, latency_ms, pii_detected}
+  Pipeline: see Section 18
+
+────────────────────────────────────────────────────────
+GET /metrics
+  Response: Full metrics object (40+ keys) — see Section 10 for complete list
+
+────────────────────────────────────────────────────────
+GET /security-events
+  Response: {injection_attempts: int, pii_detected: int, rate_limit_hits: int}
+
+────────────────────────────────────────────────────────
+GET /users
+  Response: {users: [array of profiles with metrics], total: int}
+
+────────────────────────────────────────────────────────
+POST /register
+  Body: {user_id, provider, full_name, email, title, company, country}
+  Logic: tristan.gitman@un.org → status="approved" immediately
+         All others → status="pending"
+  Response: {message, status}
+
+────────────────────────────────────────────────────────
+GET /user-profile/{user_id}
+  Response: {profile: {...full profile} | null}
+
+────────────────────────────────────────────────────────
+POST /auth/approve?user_id=X&approved_by=Y
+  Sets profile.status = "approved"
+  Moves user_id from users:pending → users:approved in Redis
+
+────────────────────────────────────────────────────────
+POST /auth/revoke?user_id=X&revoked_by=Y
+  Sets profile.status = "revoked"
+  Moves user_id to users:revoked in Redis
+
+────────────────────────────────────────────────────────
+GET /auth/validate/{user_id}
+  Response: {status: "unregistered"|"pending"|"approved"|"revoked", profile: {...}|null}
+  Called by AuthGate.js on every page load — determines which screen to show
+
+────────────────────────────────────────────────────────
+POST /auth/logout-dev?user_id=X
+  Deletes Redis profile key
+  Removes user_id from all Redis user sets
+  Local development only — has no effect in production
+
+────────────────────────────────────────────────────────
+POST /feedback
+  Body: {query_id, question, answer, rating (1 or -1), user_id, comment}
+  Stores: feedback:{query_id} key + adds to feedback:all set
+          rating=1 → also added to feedback:positive set
+          rating=-1 → also added to feedback:negative set
+
+────────────────────────────────────────────────────────
+GET /feedback/export
+  Response: {feedback: [...all records sorted descending by date], total: int}
+
+────────────────────────────────────────────────────────
+GET /feedback/finetune-export
+  Response: {jsonl: "line1\nline2\n...", total: int}
+  Returns: positive-only feedback (rating=1) formatted as GPT fine-tuning JSONL
+  Each line: {"messages": [{"role":"system",...},{"role":"user",...},{"role":"assistant",...}]}
+
+────────────────────────────────────────────────────────
+POST /clear-cache
+  Deletes all Redis keys matching "cache:*"
+  Returns: {message, keys_deleted}
+
+────────────────────────────────────────────────────────
+POST /reset-metrics
+  Deletes all Redis keys matching "metrics:*" and "security:*"
+  Returns: {message}
+
+
+================================================================================
+9. REDIS KEY SCHEMA
+================================================================================
+
+User data:
+  user:{user_id}:profile          → JSON string (full profile object)
+  users:all                       → SET  all registered user_ids
+  users:approved                  → SET  approved user_ids
+  users:pending                   → SET  pending user_ids
+  users:revoked                   → SET  revoked user_ids
+
+Profile JSON structure:
+  {
+    user_id, provider, full_name, email, title, company, country,
+    registered_at (ISO), last_active (ISO), status,
+    approved_by (optional), approved_at (optional),
+    revoked_by (optional), revoked_at (optional)
+  }
+
+Rate limiting:
+  user:{user_id}:requests         → counter with TTL=60s (10 req/min enforcement)
+
+Per-user metrics:
+  user:{user_id}:total_queries    → integer counter
+  user:{user_id}:style:{style}    → counter per style
+  user:{user_id}:hallucinations   → integer counter
+  user:{user_id}:latencies        → LIST of floats (last 100, LPUSH+LTRIM)
+  user:{user_id}:last_active      → ISO timestamp string
+
+Global metrics:
+  metrics:total_queries           → integer counter (INCR)
+  metrics:cache_hits              → integer counter
+  metrics:hallucinations          → integer counter
+  metrics:pii_detected            → integer counter
+  metrics:style:{style}           → counter per style (factual/analytical/summary/safety/adversarial)
+  metrics:source:{source}         → counter per document source
+  metrics:latencies               → LIST of floats (last 1000, LPUSH+LTRIM)
+  metrics:feedback:positive       → integer counter
+  metrics:feedback:negative       → integer counter
+
+Security:
+  security:injection              → integer counter
+  security:pii                    → integer counter
+  security:rate_limit             → integer counter
+
+Semantic cache:
+  cache:{hash}                    → JSON string with TTL=3600s
+  Hash = hash(query + prompt_type + topic)
+  JSON: {query, answer, prompt_type, topic, vector: [1536 floats]}
+
+Feedback:
+  feedback:all                    → SET of query_ids
+  feedback:{query_id}             → JSON string (full feedback record)
+  feedback:positive               → SET of positive query_ids
+  feedback:negative               → SET of negative query_ids
+
+
+================================================================================
+10. METRICS ENDPOINT — COMPLETE RETURN OBJECT
+================================================================================
+
+GET /metrics computes and returns all of the following.
+All percentage values are strings e.g. "5%".
+All cost values are strings e.g. "$0.000123".
+All latency values are strings e.g. "1.23s".
+
+Live from Redis:
+  total_queries               int
+  cache_hit_rate              str   "NN%"
+  hallucination_rate          str   "NN%"
+  pii_detection_rate          str   "NN%"
+  security_block_rate         str   "NN%"
+  style_distribution          dict  {style_name: count}
+  top_sources                 dict  {source_name: count}
+  latency_p50                 str
+  latency_p95                 str
+  latency_p99                 str
+  latency_min                 str
+  latency_max                 str
+  pii_entity_breakdown        dict  {entity_type: count}
+  user_activity               list  of user metric objects
+  total_registered_users      int
+  total_feedback              int   (scard("feedback:all"))
+
+Live from LangSmith (last 100 LLM runs):
+  avg_latency                 str
+  p95_latency                 str
+  total_tokens                int
+  prompt_tokens               int
+  completion_tokens           int
+  total_cost                  str   "$N.NNNN"
+  cost_per_query              str   "$N.NNNNNN"
+  error_rate                  str   "NN%"
+  total_llm_runs              int
+  model_distribution          dict  {model_name: count}
+
+Live from Elasticsearch:
+  es_document_count           int   (normally 2059)
+
+Live from Redis INFO:
+  redis_memory_used           str   "N.NNM"
+  redis_memory_peak           str
+  redis_connected_clients     int
+  redis_keyspace_hit_ratio    str
+  redis_total_keys            int
+  redis_uptime_days           int
+
+Static architecture facts (hardcoded in get_metrics() — real values not guesses):
+  active_risk_categories      3    (injection, pii, rate_limit)
+  reviewed_providers          4    (OpenAI, Elasticsearch, LangSmith, Azure Language)
+  model_components            3    (fine-tuned LLM, base LLM, embedding model)
+  reviewed_models             3
+  azure_services              7    (Container Apps, SWA, Redis, ACR, Key Vault, ES, Language)
+  zdr_providers               1    (OpenAI confirmed zero data retention)
+  swappable_components        3    (LLM, embedding model, vector store)
+  documented_apis             5    (OpenAI, Elasticsearch, LangSmith, Azure Language, Redis)
+  classified_sources          9
+  cleared_sources             9
+  azure_regions               1
+  vault_secrets               12
+  cors_origins                3
+  active_security_controls    5    (vault, identity, CORS, injection detection, auth)
+  max_replicas                3
+  health_probe_count          3    (liveness, readiness, startup)
+  health_indicators           2    (system health, Redis connectivity)
+  pipeline_stages             3    (test, build, deploy)
+
+Computed from live Redis data:
+  active_styles     len([v for v in style_distribution.values() if v > 0])
+  active_sources    len(top_sources)
+
+
+================================================================================
+11. NAVIGATION STRUCTURE (App.js)
+================================================================================
+
+Current state: Two-zone navigation using lucide-react@0.383.0
+
+Import statement to add to App.js:
+  import { Compass, Activity, Bot, BarChart3, ShieldCheck,
+           Network, ClipboardCheck, SlidersHorizontal } from 'lucide-react';
+
+All icons: size={15} strokeWidth={1.75}
+
+─────────────────────────────────────────────
+ZONE 1 — GOVERNANCE FRAMEWORK  (left of divider)
+─────────────────────────────────────────────
+Zone label text : "GOVERNANCE FRAMEWORK"
+Label style     : 0.58rem, 700 weight, uppercase, var(--text-tertiary), letterSpacing 0.08em
+Active underline: 2px solid #009edb (UN blue)
+Tabs:
+  Compass   id="framework"   label="Framework"   ← DEFAULT on load
+  Activity  id="governance"  label="Monitoring"
+
+─────────────────────────────────────────────
+Vertical Divider
+  1px var(--border), margin 8px 0, full height of nav row
+─────────────────────────────────────────────
+
+─────────────────────────────────────────────
+ZONE 2 — LIVE AGENTIC SOLUTION  (right of divider)
+─────────────────────────────────────────────
+Zone label text : "LIVE AGENTIC SOLUTION"
+Active underline: 2px solid #1a73e8
+Tabs:
+  Bot              id="agent"         label="Agent"
+  BarChart3        id="analytics"     label="Analytics"
+  ShieldCheck      id="security"      label="Security"
+  Network          id="architecture"  label="Architecture"
+  ClipboardCheck   id="evals"         label="Evals"
+
+─────────────────────────────────────────────
+HEADER TOP RIGHT (outside nav zones)
+─────────────────────────────────────────────
+  SlidersHorizontal  id="admin"  label="Admin"
+  Styled as bordered button (not nav tab)
+  Visible only when isAdmin = true
+
+─────────────────────────────────────────────
+Tab → Component mapping
+─────────────────────────────────────────────
+  framework     → FrameworkTab.js
+  governance    → ResponsibleAITab.js
+  agent         → QueryTab.js
+  analytics     → AnalyticsTab.js
+  security      → SecurityTab.js
+  architecture  → ArchitectureTab.js
+  evals         → EvalTab.js
+  admin         → AdminTab.js   (only renders if isAdmin)
+
+State:
+  const [activeTab, setActiveTab] = useState('framework');
+  Single state — zone derived from tab value
+  isSolutionZone  = ['agent','analytics','security','architecture','evals'].includes(activeTab)
+  isGovernanceZone = ['framework','governance'].includes(activeTab)
+
+
+================================================================================
+12. FRAMEWORK TAB ARCHITECTURE (FrameworkTab.js)
+================================================================================
+
+The most architecturally significant component. Status: IN PROGRESS.
+
+Two conceptually distinct layers visible in UI:
+
+LAYER 1 — "Governance Standard"
+  What any RAG application must have — solution-agnostic
+  Background     : var(--surface-2)
+  Border-left    : 3px solid [step color] at 40% opacity
+  Label          : "GOVERNANCE STANDARD" in small uppercase var(--text-tertiary)
+  Content        : Requirement text + Control description + Policy hyperlink badge
+
+LAYER 2 — "Live Compliance Evidence"
+  Proof from THIS live system — solution-specific, dynamically updated
+  Background     : var(--surface)
+  Border-left    : 3px solid [step color] at 100% opacity
+  Label          : "LIVE COMPLIANCE EVIDENCE" colored with step color
+  Content        : Status emoji + live metric value (large, in step color) +
+                   metric label + "→ View in [Tab]" button
+
+Sections (rendered in order):
+  1. Header
+     Title    : "Responsible AI Governance Playbook"
+     Subtitle : "Applied governance for custom RAG GenAI applications — from intake to certification"
+     Note     : "Reference Implementation: UN Secretariat AI Governance Assistant"
+
+  2. Why This Framework (2-column cards side by side)
+     LEFT CARD  — "Beyond Standard IT Governance"  (var(--danger) accent)
+                  Title: "What This Framework Accomplishes"
+                  6 items, each: number circle + bold label + one-line explanation
+                  1. RAG-Specific Threat Model
+                  2. AI Impact Assessment as a Lifecycle Obligation
+                  3. Data Source Governance at the Chunk Level
+                  4. Model Selection as a Governance Gate
+                  5. Attribution at the Query Level
+                  6. Feedback-Driven Certification Evidence
+     RIGHT CARD — "What Clients Gain"  (var(--success) accent)
+                  Title: "Business Benefits"
+                  6 items:
+                  1. Accelerated IS Certification
+                  2. Reduced Hallucination Risk
+                  3. Controlled Cost at Scale
+                  4. Audit-Ready at All Times
+                  5. Data Boundary Clarity
+                  6. Sustainable Governance
+     FOOTNOTE (under both cards):
+       "Governance requirements reference: " followed by hyperlinks:
+       Information Sensitivity → https://www.undocs.org/en/ST/SGB/2007/6
+       Data Protection         → https://www.undocs.org/en/ST/SGB/2024/3
+       Use of ICT Resources    → https://www.undocs.org/en/ST/SGB/2004/15
+       Record-keeping          → https://www.undocs.org/en/ST/SGB/2007/5
+       ICT Security Portal     → https://policy.un.org/en/information-and-technology/ict-security
+       ICT Project Management  → https://policy.un.org/en/information-and-technology/ict-project-management
+
+  3. Live Governance Pulse (6 KPI tiles — fetched from backend on mount)
+     System Health    → GET /health → "healthy"/"degraded" → green/red badge
+     Hallucination    → metrics.hallucination_rate
+     Security Events  → GET /security-events → injection_attempts + pii_detected
+     Cache Hit Rate   → metrics.cache_hit_rate
+     Cost Per Query   → metrics.cost_per_query
+     Active Users     → GET /users → total count
+     Each tile: label + live value + status dot + click navigates to its tab
+
+  4. 9-Step Pipeline
+     Horizontal scrollable row of pills
+     Each pill: step number circle + step name
+     Active step highlighted in step color
+     Clicking sets activeStep state + scrolls to expanded card
+
+  5. Expanded Step Card — 3 levels
+     Level 1: INPUT → STEP NAME → OUTPUT banner (always visible when step active)
+     Level 2: Requirements table with columns Requirement | Policy (hyperlink)
+              Each row clickable → expands Level 3 inline below it
+     Level 3: Two-section layout per requirement:
+              Section A (Governance Standard) + Section B (Live Compliance Evidence)
+
+Props:
+  { onTabChange: function(tabId: string) }  — navigates to another tab on "View in" click
+
+State:
+  activeStep   int default 1
+  expandedReq  string|null  key format: "${stepNum}-${reqIndex}"
+  metrics      object (from /metrics)
+  health       object (from /health)
+  users        object (from /users)
+  securityEvents object (from /security-events)
+  loading      boolean
+
+Fetches on mount:
+  GET ${API_URL}/metrics
+  GET ${API_URL}/health
+  GET ${API_URL}/users
+  GET ${API_URL}/security-events
+
+Metric display rules:
+  Percentage values (hallucination_rate, pii_detection_rate, etc.) → display as-is ("5%")
+  Cost values (cost_per_query) → display as-is ("$0.000123")
+  Count values → display with toLocaleString()
+  Missing/null metric → display "—"
+
+
+================================================================================
+13. 9-STEP GOVERNANCE FRAMEWORK — COMPLETE DATA
+================================================================================
+
+57 requirements across 9 steps.
+Universal layer: req (requirement), policy (name), url (policy URL), control (description)
+Solution layer:  metric (key from /metrics), label (human-readable)
+
+Policy URL reference:
+  [ICT-PM]   = https://policy.un.org/en/information-and-technology/ict-project-management
+  [ICT-SEC]  = https://policy.un.org/en/information-and-technology/ict-security
+  [DP]       = https://www.undocs.org/en/ST/SGB/2024/3
+  [INT]      = https://policy.un.org/en/information-and-technology/internet
+  [DATA]     = https://policy.un.org/en/information-and-technology/data-and-information
+  [IS]       = https://www.undocs.org/en/ST/SGB/2007/6
+  [RK]       = https://www.undocs.org/en/ST/SGB/2007/5
+  [ICT-USE]  = https://www.undocs.org/en/ST/SGB/2004/15
+
+────────────────────────────────────────────────────────────────────────────
+STEP 1 — Client Engagement  #009edb
+Input:  Business need identified
+Output: Approved use case brief with named accountable owner
+────────────────────────────────────────────────────────────────────────────
+1.1  Req    : Documented business problem and scope
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Number of distinct use case types actively served in production,
+              each representing a documented business problem the system addresses
+     Metric : active_styles
+     Label  : Active use case types
+
+1.2  Req    : Measurable success criteria defined
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Response quality measured continuously against the success
+              thresholds defined before development commenced
+     Metric : hallucination_rate
+     Label  : Hallucination rate
+
+1.3  Req    : Named accountable owner and designated AI Focal Point
+     Policy : Use of ICT Resources (ST/SGB/2004/15)  [ICT-USE]
+     Control: All users require explicit admin approval — owner identity
+              enforced through the access registration gate
+     Metric : total_registered_users
+     Label  : Registered users
+
+────────────────────────────────────────────────────────────────────────────
+STEP 2 — Use Case Review  #1a73e8
+Input:  Approved use case brief
+Output: Filed AI Impact Assessment with risk tier (Low/Medium/High/Very High)
+────────────────────────────────────────────────────────────────────────────
+2.1  Req    : Formal risk classification — Low / Medium / High / Very High
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Number of distinct risk domains actively monitored, each
+              representing a formally assessed and classified threat category
+     Metric : active_risk_categories
+     Label  : Active risk categories
+
+2.2  Req    : Foreseeable harms documented by multidisciplinary team
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Every response evaluated for factual grounding — confidence score
+              evidences harm assessment is operationally enforced
+     Metric : hallucination_rate
+     Label  : Hallucination rate
+
+2.3  Req    : Compliance check — data protection, privacy, human rights
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: Personal data detected and anonymized before reaching the model —
+              rate evidences continuous privacy compliance enforcement
+     Metric : pii_detection_rate
+     Label  : PII detection rate
+
+2.4  Req    : Third-party provider risk assessed — data terms, retention, provenance
+     Policy : Internet Portal  [INT]
+     Control: Number of external providers with reviewed and confirmed data
+              handling contracts governing query processing
+     Metric : reviewed_providers
+     Label  : Providers reviewed
+
+2.5  Req    : Impact assessment filed and scheduled for periodic review
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Volume of queries processed under current risk posture evidences
+              continuous operation within documented governance boundaries
+     Metric : total_queries
+     Label  : Total queries logged
+
+────────────────────────────────────────────────────────────────────────────
+STEP 3 — Solution Assessment  #7b61ff
+Input:  Filed impact assessment with risk tier
+Output: Documented technology decision with model, hosting, retrieval, cost model
+────────────────────────────────────────────────────────────────────────────
+3.1  Req    : Model strategy documented — custom / fine-tuned / base LLM with rationale
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Number of distinct AI model components deployed, each with
+              documented provenance, licensing, and governance coverage
+     Metric : model_components
+     Label  : Model components
+
+3.2  Req    : Open vs. closed source decision — provenance, licensing, auditability confirmed
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: Number of model components with confirmed training data terms,
+              usage rights, and supply chain documentation
+     Metric : reviewed_models
+     Label  : Models reviewed
+
+3.3  Req    : Hosting boundary defined — cloud / on-premises / hybrid with data residency
+     Policy : Internet Portal  [INT]
+     Control: Number of infrastructure services provisioned, each representing
+              an explicit hosting decision with documented data boundary
+     Metric : azure_services
+     Label  : Services provisioned
+
+3.4  Req    : Provider data terms confirmed — query retention, training, cross-border transfer
+     Policy : Internet Portal  [INT]
+     Control: Number of external providers with confirmed contractual protection
+              for query content
+     Metric : zdr_providers
+     Label  : Providers confirmed
+
+3.5  Req    : Retrieval strategy selected and justified — keyword / semantic / hybrid
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Scale of indexed corpus evidences the complexity that justifies
+              the chosen retrieval strategy over simpler alternatives
+     Metric : es_document_count
+     Label  : Corpus scale
+
+3.6  Req    : FinOps estimate — projected cost per query with approved budget
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Actual cost per query in production versus pre-build estimate —
+              evidences the financial model is operating as projected
+     Metric : cost_per_query
+     Label  : Cost per query
+
+3.7  Req    : Acceptable hallucination threshold defined and documented
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: Hallucination rate measured on every response confirming the
+              system operates within the threshold set at assessment
+     Metric : hallucination_rate
+     Label  : Hallucination rate
+
+3.8  Req    : Alternatives assessment — why RAG over simpler approaches
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Scale and complexity of indexed corpus evidences the justification
+              for RAG over keyword search or structured query
+     Metric : es_document_count
+     Label  : Corpus scale
+
+3.9  Req    : Lock-in risk assessed — critical components replaceable without re-architecture
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Number of independently swappable pipeline components — LLM,
+              embedding model, and vector store each replaceable without code change
+     Metric : swappable_components
+     Label  : Swappable components
+
+────────────────────────────────────────────────────────────────────────────
+STEP 4 — Data Source Review  #f9ab00
+Input:  Approved technology decision and hosting boundary
+Output: Approved data source inventory with classification and connectivity map
+────────────────────────────────────────────────────────────────────────────
+4.1  Req    : Full source inventory — documents, databases, APIs, catalogues, live feeds
+     Policy : Data and Information Portal  [DATA]
+     Control: Total chunks indexed evidences complete corpus ingestion with
+              every approved source accounted for
+     Metric : es_document_count
+     Label  : Chunks indexed
+
+4.2  Req    : API connectivity documented — endpoint, authentication, rate limits, versioning
+     Policy : Data and Information Portal  [DATA]
+     Control: Number of active API integrations with documented authentication
+              method, endpoint, and rate limit governance
+     Metric : documented_apis
+     Label  : APIs documented
+
+4.3  Req    : Sensitivity classification applied per source — Public/Internal/Confidential/Restricted
+     Policy : Information Sensitivity (ST/SGB/2007/6)  [IS]
+     Control: Number of source documents with confirmed sensitivity classification
+              under applicable information handling policy
+     Metric : classified_sources
+     Label  : Sources classified
+
+4.4  Req    : Legal basis confirmed for processing each source in an AI system
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: Number of source documents with verified legal basis — copyright,
+              licensing, and data ownership reviewed before ingestion
+     Metric : cleared_sources
+     Label  : Sources cleared
+
+4.5  Req    : Privacy impact assessment completed where personal data is involved
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: PII detection rate on queries evidences active monitoring —
+              confirming personal data exposure risk is controlled
+     Metric : pii_detection_rate
+     Label  : PII events detected
+
+4.6  Req    : Data quality readiness assessed — completeness, currency, noise ratio
+     Policy : Data and Information Portal  [DATA]
+     Control: Number of distinct sources actively returning results in production —
+              evidences retrieval quality across the approved corpus
+     Metric : active_sources
+     Label  : Active sources cited
+
+4.7  Req    : All sources registered in enterprise data catalogue
+     Policy : Record-keeping and UN Archives (ST/SGB/2007/5)  [RK]
+     Control: Number of distinct source documents appearing in production citations —
+              each representing a traceable catalogue entry
+     Metric : active_sources
+     Label  : Catalogue entries
+
+────────────────────────────────────────────────────────────────────────────
+STEP 5 — Data Management  #1e8e3e
+Input:  Approved source inventory and connectivity map
+Output: Governed data pipeline with lineage, SLA, cost baseline, residency confirmation
+────────────────────────────────────────────────────────────────────────────
+5.1  Req    : Ingestion pipeline documented, version-controlled, and reproducible
+     Policy : Data and Information Portal  [DATA]
+     Control: Total chunks in index evidences the pipeline executed completely
+              and reproducibly across all approved source documents
+     Metric : es_document_count
+     Label  : Chunks indexed
+
+5.2  Req    : Embedding model governance — version locked, dimensions documented, change control defined
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Index size is stable — any embedding model change alters chunk count
+              and triggers mandatory re-evaluation before deployment
+     Metric : es_document_count
+     Label  : Index size
+
+5.3  Req    : Index freshness SLA defined — update frequency documented, staleness alerts configured
+     Policy : Data and Information Portal  [DATA]
+     Control: Document count monitored against defined baseline — deviation
+              triggers re-indexing and re-evaluation cycle
+     Metric : es_document_count
+     Label  : Index count live
+
+5.4  Req    : Cache policy documented — similarity threshold, TTL, and invalidation rules defined
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Proportion of queries served from cache without a model call —
+              evidences the cache policy is operating within defined parameters
+     Metric : cache_hit_rate
+     Label  : Cache hit rate
+
+5.5  Req    : Data lineage maintained — every output traceable to source document or API version
+     Policy : Record-keeping and UN Archives (ST/SGB/2007/5)  [RK]
+     Control: Number of distinct sources cited in production responses — each
+              citation a verified lineage link from generated output to indexed source
+     Metric : active_sources
+     Label  : Cited sources
+
+5.6  Req    : FinOps controls active — cost per query monitored, budget alerts configured
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Actual cost per query in production deflected by cache — evidences
+              FinOps controls are operating as designed
+     Metric : cost_per_query
+     Label  : Cost per query
+
+5.7  Req    : Data residency boundary confirmed — processing location and transit path documented
+     Policy : Internet Portal  [INT]
+     Control: Number of infrastructure regions processing application data —
+              confirms data residency boundary is respected and documented
+     Metric : azure_regions
+     Label  : Regions confirmed
+
+────────────────────────────────────────────────────────────────────────────
+STEP 6 — Architecture & InfoSec Review  #d93025
+Input:  Data pipeline design and hosting boundary
+Output: IS-certified architecture with formal security sign-off before go-live
+────────────────────────────────────────────────────────────────────────────
+6.1  Req    : RAG-specific threat model — injection, poisoning, exfiltration, inversion
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Proportion of queries blocked by the automated threat detector —
+              evidences the RAG threat model is enforced in production
+     Metric : security_block_rate
+     Label  : Security block rate
+
+6.2  Req    : All credentials under approved secrets management — no plaintext anywhere
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Number of application secrets under vault management — confirms
+              zero plaintext credentials in any deployment configuration
+     Metric : vault_secrets
+     Label  : Secrets protected
+
+6.3  Req    : Network access restricted to approved origins and endpoints
+     Policy : Internet Portal  [INT]
+     Control: Number of explicitly approved origins permitted to call the API —
+              all other network access rejected at the perimeter
+     Metric : cors_origins
+     Label  : Approved origins
+
+6.4  Req    : Authenticated and approved identity required on all client endpoints and devices
+     Policy : Use of ICT Resources (ST/SGB/2004/15)  [ICT-USE]
+     Control: Number of users whose access is enforced through the identity
+              governance layer across all endpoints before any query is permitted
+     Metric : total_registered_users
+     Label  : Approved users
+
+6.5  Req    : LLM provider data handling terms reviewed — retention, isolation, cross-border transfer
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: Number of providers with confirmed contractual protection for query
+              content — no unauthorised use, retention, or training
+     Metric : reviewed_providers
+     Label  : Contracts reviewed
+
+6.6  Req    : Formal information security certification issued before go-live
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Number of independently verified security control layers active in
+              production — each required before user traffic is routed
+     Metric : active_security_controls
+     Label  : Active controls
+
+────────────────────────────────────────────────────────────────────────────
+STEP 7 — Infrastructure Optimization  #e8710a
+Input:  Certified architecture
+Output: Production-ready infrastructure with scaling, health monitoring, resilience
+────────────────────────────────────────────────────────────────────────────
+7.1  Req    : Compute resources right-sized to defined SLA and cost target
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Number of active client connections evidences real-time
+              infrastructure load against provisioned compute allocation
+     Metric : redis_connected_clients
+     Label  : Connected clients
+
+7.2  Req    : Scaling policy defined — minimum availability guaranteed, no cold-start risk
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Maximum replica count configured — minimum always-warm instance
+              ensures availability without cold-start latency
+     Metric : max_replicas
+     Label  : Max replicas
+
+7.3  Req    : Health monitoring active — liveness, readiness, and startup checks configured
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Number of active health probe types configured — confirming
+              automated failure detection is operational
+     Metric : health_probe_count
+     Label  : Probe types active
+
+7.4  Req    : Persistence layer resilience defined — RTO/RPO documented for cache and knowledge base
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Number of days the persistence layer has operated continuously —
+              evidences resilience meets the documented recovery objectives
+     Metric : redis_uptime_days
+     Label  : Uptime days
+
+7.5  Req    : Business owner sign-off and user acceptance completed before go-live
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Number of users who received explicit admin approval before accessing
+              the system — evidences owner acceptance gate is enforced
+     Metric : total_registered_users
+     Label  : Approved users
+
+────────────────────────────────────────────────────────────────────────────
+STEP 8 — Solution Development  #5f6368
+Input:  Production-ready infrastructure
+Output: QA'd, adversarially-tested application with model registry and versioned prompts
+────────────────────────────────────────────────────────────────────────────
+8.1  Req    : Evaluation harness established — test queries with documented expected outputs
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Number of automated quality gates that must pass before any
+              deployment — evidences evaluation is embedded in the release process
+     Metric : pipeline_stages
+     Label  : Pipeline stages
+
+8.2  Req    : Hallucination measurement methodology defined and threshold enforced
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: Hallucination rate on every production response tracked against
+              the threshold documented in the impact assessment
+     Metric : hallucination_rate
+     Label  : Hallucination rate
+
+8.3  Req    : Adversarial testing completed — injection, data extraction, jailbreak before go-live
+     Policy : ICT Security Portal  [ICT-SEC]
+     Control: Proportion of adversarial inputs successfully detected and blocked —
+              evidences red team controls are active in production
+     Metric : security_block_rate
+     Label  : Block rate
+
+8.4  Req    : Prompt versioning and change governance — all changes version-controlled and approved
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Total LLM calls traced — every inference attributable to the current
+              approved prompt version and model configuration
+     Metric : total_llm_runs
+     Label  : LLM runs
+
+8.5  Req    : Model registry established — all deployed model versions catalogued with lineage
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Number of model components with documented version, provenance,
+              and governance coverage in the model registry
+     Metric : model_components
+     Label  : Model versions registered
+
+8.6  Req    : Fine-tuning governance — training data provenance and eval metrics documented
+     Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+     Control: Number of validated feedback items available as governed training
+              data — evidences the fine-tuning pipeline has documented provenance
+     Metric : total_feedback
+     Label  : Fine-tune ready items
+
+8.7  Req    : CI/CD governance — automated quality gates enforced on every production deployment
+     Policy : ICT Project Management  [ICT-PM]
+     Control: Number of mandatory pipeline stages all required to pass — test,
+              build, and deploy gates enforced on every release
+     Metric : pipeline_stages
+     Label  : Pipeline stages
+
+────────────────────────────────────────────────────────────────────────────
+STEP 9 — Monitoring  #009edb
+Input:  Live application in production
+Output: Ongoing compliance evidence + annual certification package ready for audit
+────────────────────────────────────────────────────────────────────────────
+9.1   Req    : Continuous KPI monitoring — defined thresholds, deviation triggers escalation
+      Policy : ICT Security Portal  [ICT-SEC]
+      Control: Total queries processed evidences continuous system operation —
+               every query measured against governance thresholds
+      Metric : total_queries
+      Label  : Total queries
+
+9.2   Req    : Knowledge base currency — source expiry tracked, refresh on defined schedule
+      Policy : Record-keeping and UN Archives (ST/SGB/2007/5)  [RK]
+      Control: Index count monitored against ingestion baseline — deviation
+               triggers re-indexing and re-evaluation
+      Metric : es_document_count
+      Label  : Index count
+
+9.3   Req    : Model drift detection — performance regression against golden test set triggers review
+      Policy : ICT Project Management  [ICT-PM]
+      Control: Hallucination rate trend over time — sustained increase above
+               threshold triggers model re-evaluation
+      Metric : hallucination_rate
+      Label  : Hallucination rate
+
+9.4   Req    : Data drift detection — input distribution shift monitored for behavioural change
+      Policy : Data and Information Portal  [DATA]
+      Control: Number of distinct query categories in active use — shift in
+               distribution signals changed user behaviour requiring review
+      Metric : active_styles
+      Label  : Active query styles
+
+9.5   Req    : Retrieval quality monitored — embedding performance tracked against defined baseline
+      Policy : Data and Information Portal  [DATA]
+      Control: Indexed document count monitored against baseline — drift triggers
+               re-embedding and retrieval quality re-evaluation
+      Metric : es_document_count
+      Label  : Index baseline
+
+9.6   Req    : Retraining trigger criteria defined — threshold that initiates fine-tuning cycle
+      Policy : ICT Project Management  [ICT-PM]
+      Control: Number of negative feedback submissions — volume above defined
+               threshold initiates the governed fine-tuning review process
+      Metric : total_feedback
+      Label  : Feedback items
+
+9.7   Req    : User feedback loop active — negative signals drive continuous model improvement
+      Policy : ICT Project Management  [ICT-PM]
+      Control: Total feedback submissions logged and classified — each item
+               available for model improvement review and export
+      Metric : total_feedback
+      Label  : Feedback logged
+
+9.8   Req    : Access audit conducted — inactive or unauthorised accounts reviewed and revoked
+      Policy : Use of ICT Resources (ST/SGB/2004/15)  [ICT-USE]
+      Control: Total registered users with full approve and revoke history —
+               admin panel provides complete access audit trail
+      Metric : total_registered_users
+      Label  : Registered users
+
+9.9   Req    : Impact assessment reviewed periodically — interim review on significant change
+      Policy : Data Protection and Privacy (ST/SGB/2024/3)  [DP]
+      Control: Hallucination rate trend confirms system operating within the risk
+               posture documented in the filed impact assessment
+      Metric : hallucination_rate
+      Label  : Hallucination rate
+
+9.10  Req    : Annual certification evidence package generated — KPIs, events, access, model changes
+      Policy : ICT Project Management  [ICT-PM]
+      Control: Total LLM calls fully traced — complete inference history
+               retrievable for annual certification and external audit
+      Metric : total_llm_runs
+      Label  : LLM runs traced
+
+9.11  Req    : Decommissioning criteria defined — conditions under which system is retired documented
+      Policy : Data and Information Portal  [DATA]
+      Control: Number of health indicators continuously monitored — any degraded
+               indicator triggers escalation and review process
+      Metric : health_indicators
+      Label  : Health indicators
+
+
+================================================================================
+14. CSS VARIABLES (App.css)
+================================================================================
+
+All components use these CSS variables exclusively. No hardcoded colours.
+
+--primary           Main UN blue (used for primary actions and active states)
+--primary-light     Light tint of primary
+--surface           White/light card background
+--surface-2         Slightly darker (alternating rows, input backgrounds)
+--surface-3         Even darker (dividers, heavy borders)
+--border            Standard 1px border colour
+--text-primary      Main body text
+--text-secondary    Muted/secondary text
+--text-tertiary     Very muted (labels, captions, zone headers)
+--success           Green (approved, healthy, positive feedback)
+--warning           Amber (pending, partial, caution)
+--danger            Red (revoked, error, blocked, gap cards)
+--radius-sm         Small border-radius
+--radius-md         Medium border-radius
+--radius-lg         Large border-radius
+--shadow-1          Subtle card shadow
+--shadow-3          Strong shadow (modals, elevated cards)
+
+
+================================================================================
+15. DEPLOYMENT COMMANDS
+================================================================================
+
+─── Backend ───
+docker build --no-cache --platform linux/amd64 \
+  -t governancedemoacr.azurecr.io/governance-backend:v6 .
+
+az acr login --name governancedemoacr
+
+docker push governancedemoacr.azurecr.io/governance-backend:v6
+
+az containerapp update \
+  --name governance-backend \
+  --resource-group rg-governance-demo \
+  --image governancedemoacr.azurecr.io/governance-backend:v6
+
+─── Frontend ───
+cd frontend
+npm run build
+swa deploy ./build \
+  --deployment-token $(az staticwebapp secrets list \
+    --name governance-frontend \
+    --resource-group rg-governance-demo \
+    --query "properties.apiKey" -o tsv) \
+  --env production
+
+─── Git ───
+git add .
+git commit -m "description of change"
+git push origin main
+
+─── Key Vault — update a secret ───
+az keyvault secret set \
+  --vault-name gov-demo-kv-truos \
+  --name SECRET-NAME \
+  --value "new-value"
+
+─── GitHub — update a secret ───
+gh secret set SECRET_NAME \
+  --repo truos-official/governance-demo-agentic \
+  --body "new-value"
+
+─── Check Container App status ───
+az containerapp revision list \
+  --name governance-backend \
+  --resource-group rg-governance-demo \
+  --query "[].{name:name,active:properties.active,state:properties.runningState}" \
+  -o table
+
+─── View Container App logs ───
+az containerapp logs show \
+  --name governance-backend \
+  --resource-group rg-governance-demo \
+  --tail 50
+
+─── Start local development ───
+# Backend
+cd C:\Users\trist\OneDrive\Desktop\agentic-application
+venv\Scripts\activate
+uvicorn src.api:app --reload --port 8000
+
+# Frontend (separate terminal)
+cd frontend
+npm start
+
+
+================================================================================
+16. GITHUB ACTIONS CI/CD (.github/workflows/ci.yml)
+================================================================================
+
+Triggers: push to main, pull_request to main, workflow_dispatch
+
+Job 1: test
+  Runs on  : ubuntu-latest
+  Python   : 3.11
+  Steps    : pip install -r requirements.txt
+             python -m pytest tests/ -v
+  Env vars : all injected from GitHub Secrets
+
+Job 2: deploy-backend  (push to main only, depends on test)
+  az login via AZURE_CREDENTIALS
+  az acr login
+  docker build --platform linux/amd64 --tag with git SHA
+  docker push
+  az containerapp update
+
+Job 3: deploy-frontend  (push to main only, depends on test)
+  Node 20
+  npm ci
+  npm run build  (uses REACT_APP_API_URL from GitHub Secrets)
+  Azure/static-web-apps-deploy@v1
+
+GitHub Secrets required:
+  OPENAI_API_KEY
+  REDIS_HOST
+  REDIS_PORT
+  REDIS_PASSWORD
+  ELASTIC_ENDPOINT
+  ELASTIC_API_KEY
+  LANGCHAIN_API_KEY
+  AZURE_LANGUAGE_ENDPOINT
+  AZURE_LANGUAGE_KEY
+  REACT_APP_API_URL
+  SWA_DEPLOYMENT_TOKEN
+  AZURE_CREDENTIALS   (service principal JSON)
+
+AZURE_CREDENTIALS JSON format:
+  {
+    "clientId":       "...",
+    "clientSecret":   "...",
+    "subscriptionId": "a022ff24-58dd-48b0-a8b5-0791dbdb06e6",
+    "tenantId":       "4db4e22f-83ed-4093-8d8a-c73b1e559459"
+  }
+
+Create service principal:
+  az ad sp create-for-rbac \
+    --name "governance-github-actions" \
+    --role contributor \
+    --scopes /subscriptions/a022ff24-58dd-48b0-a8b5-0791dbdb06e6/resourceGroups/rg-governance-demo \
+    --sdk-auth
+
+
+================================================================================
+17. ENVIRONMENT VARIABLES REFERENCE
+================================================================================
+
+Backend (.env — gitignored, always retrieve from Key Vault):
+  REDIS_HOST                    governance-redis.redis.cache.windows.net
+  REDIS_PORT                    6380
+  REDIS_PASSWORD                [Key Vault: redis-password]
+  REDIS_SSL                     true
+  REDIS_SOCKET_TIMEOUT          30
+  REDIS_SOCKET_CONNECT_TIMEOUT  30
+  OPENAI_API_KEY                [Key Vault: openai-api-key]
+  ELASTIC_ENDPOINT              https://my-elasticsearch-project-f2452a.es.eastus2.azure.elastic.cloud:443
+  ELASTIC_API_KEY               [Key Vault: elastic-api-key]
+  LANGCHAIN_API_KEY             [Key Vault: langchain-api-key]
+  LANGCHAIN_PROJECT             un-governance-demo
+  LANGCHAIN_TRACING_V2          true
+  AZURE_LANGUAGE_ENDPOINT       https://eastus.api.cognitive.microsoft.com/
+  AZURE_LANGUAGE_KEY            [Key Vault: azure-language-key]
+  CORS_ORIGINS                  http://localhost:3000,https://proud-smoke-08513440f.2.azurestaticapps.net,https://ai.truos.io
+
+Frontend (frontend/.env):
+  REACT_APP_API_URL             http://localhost:8000
+
+Frontend (frontend/.env.production):
+  REACT_APP_API_URL             https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io
+
+
+================================================================================
+18. QUERY PIPELINE
+================================================================================
+
+POST /query execution order (src/api.py):
+
+1. classify_query(question)
+   Single LLM call (gpt-4o-mini) returns:
+     is_meta      bool   Is this a question about the system itself?
+     is_injection bool   Does this look like a prompt injection attempt?
+     style        str    factual / analytical / summary / safety / adversarial
+     topic        str    Detected topic
+
+2. If is_meta → answer_meta_question(question) using SYSTEM_CONTEXT string
+   Return immediately — no RAG, no Elasticsearch call
+
+3. run_security_checks(question, user_id, is_injection)
+   a. Azure Language PII detection on raw question
+   b. Rate limit check (Redis counter — 10 req/60s per user_id)
+   c. Injection flag from step 1 classifier
+   If any check fails → raise HTTPException 400 + increment security counter
+   Response body includes human-readable message (not raw JSON)
+
+4. anonymize_pii(question)
+   Azure Language replaces PII entities with [ENTITY_TYPE] tags
+   Returns clean_query (safe to send to LLM)
+
+5. build_chain(prompt_type=style, topic=topic)
+   Selects matching template from prompt_library.py (5 templates)
+   Constructs LangChain pipeline:
+     semantic_cache_check → elasticsearch_retrieve → llm_call
+
+6. chain.invoke(clean_query)
+   a. Check Redis semantic cache (0.95 cosine threshold)
+      Cache hit → return cached answer immediately
+   b. Elasticsearch hybrid search (BM25 + kNN, top_k=5)
+   c. Format context from retrieved chunks with source citations
+   d. Call fine-tuned GPT-4o-mini with prompt template
+   Returns {answer, context, sources, cache_hit}
+
+7. detect_hallucination(question, answer, context)
+   GPT-4o-mini judge evaluates whether answer is grounded in context
+   Returns {is_hallucination, confidence, reason}
+   High confidence + is_hallucination → increment metrics:hallucinations
+
+8. Track metrics (non-fatal — wrapped in try/except)
+   Increment: total_queries, style counter, source counter
+   Append to latencies list
+   Track LangSmith run via callbacks
+   Update user-specific metrics
+
+9. Return QueryResponse
+   {answer, hallucination_score, is_hallucination, detected_style,
+    sources, cache_hit, latency_ms, pii_detected}
+
+
+================================================================================
+19. STATICWEBAPP.CONFIG.JSON
+================================================================================
+
+File location: frontend/staticwebapp.config.json
+NOTE: Must have .json extension — Azure ignores files named just "staticwebapp.config"
+
+{
+  "routes": [
+    {
+      "route": "/*",
+      "allowedRoles": ["authenticated"]
+    }
+  ],
+  "responseOverrides": {
+    "401": {
+      "redirect": "/.auth/login/aad",
+      "statusCode": 302
+    },
+    "403": {
+      "statusCode": 403,
+      "rewrite": "/403.html"
+    }
+  },
+  "globalHeaders": {
+    "X-Frame-Options": "SAMEORIGIN"
+  }
+}
+
+IMPORTANT: Use "authenticated" (built-in SWA role) NOT custom role names like "approved"
+Custom roles require additional Role Management configuration and won't work without it
+
+
+================================================================================
+20. UN CORPUS DOCUMENTS
+================================================================================
+
+9 UN policy PDFs indexed in Elasticsearch (un_documents_index):
+  A/80/78           UN Secretary-General AI governance report 2025
+  A/RES/78/265      UN General Assembly AI resolution
+  E/C.16/2025/4     Committee of Experts on Public Administration — AI
+  A/79/L.94         AI governance framework proposal
+  A/79/966          AI and sustainable development nexus
+  CEB/2020/6/Add.1  UN System Chief Executives Board AI strategy
+  GE.25-06864       Human rights implications of AI systems
+  GE.25-07365       Military applications and AI governance
+  IPBES/12/INF/12   Biodiversity knowledge and AI
+
+Index stats:
+  Total chunks    : 2,059
+  Embedding model : text-embedding-3-small
+  Dimensions      : 1536
+  Chunk strategy  : Fixed size with overlap (see elastic_indexer.py)
+  Retrieval       : Hybrid BM25 (keyword weight) + kNN (semantic weight)
+  Top-K           : 5 results per query
+
+
+================================================================================
+21. FINE-TUNED MODEL
+================================================================================
+
+Model ID    : ft:gpt-4o-mini-2024-07-18:truos::DHxtzUS8
+Base model  : gpt-4o-mini-2024-07-18
+Training    : 100 UN governance Q&A pairs
+Data file   : data/fine_tune_data.jsonl
+Purpose     : Domain-adapted responses with UN policy terminology and tone
+
+Fine-tuning pipeline for future runs:
+  1. Collect positive feedback via GET /feedback/finetune-export
+  2. Validate JSONL structure (messages array: system/user/assistant roles)
+  3. Upload to OpenAI:
+       openai api fine_tuning.jobs.create \
+         --training-file file-id \
+         --model gpt-4o-mini-2024-07-18
+  4. Monitor: openai api fine_tuning.jobs.list
+  5. Evaluate new model on test set before deploying
+  6. Update model ID in rag_chain.py or set via env var
+  7. Redeploy backend container
+
+
+================================================================================
+22. ADMIN TAB CAPABILITIES (AdminTab.js)
+================================================================================
+
+Access: Only rendered when isAdmin = true (tristan.gitman@un.org)
+Icon:   SlidersHorizontal in header top-right
+ID:     "admin" — not part of tab zones, separate button
+
+User Management section:
+  Fetches GET /users on mount
+  Stats bar: Total / Pending (clickable filter) / Approved / Revoked
+  Table columns: Name, Email, Title, Organisation, Country, Status badge, Registered date, Actions
+  Approve button (green): POST /auth/approve → refreshes table
+  Revoke button (red, with window.confirm()): POST /auth/revoke → refreshes table
+  Guard: cannot revoke yourself (currentUserId prop check)
+
+Feedback section:
+  "Load Feedback" button → GET /feedback/export
+  Table: Rating emoji (👍👎), Question (truncated), Answer (truncated), Comment, User, Date
+  "Export Fine-tune JSONL" → GET /feedback/finetune-export → creates Blob → downloads as file
+  File format: one JSON object per line (JSONL) suitable for OpenAI fine-tuning upload
+
+Props: { currentUserId: string }
+
+
+================================================================================
+23. RESPONSIBLE AI TAB (ResponsibleAITab.js)
+================================================================================
+
+Nav label    : "Monitoring"  (renamed from "Responsible AI" / "Governance")
+Nav icon     : Activity (lucide-react)
+Tab ID       : "governance"
+Component    : ResponsibleAITab.js
+
+Purpose: Displays the OICT 9-step AI governance framework as an interactive
+         risk register — mapping each step to its risks, controls, and metrics.
+
+Content per step:
+  Step number and name
+  Collapsible risk cards
+  Each card: Risk description | Control implemented | KRI/metric | Evidence tab link
+
+Aligned to OICT AI Governance Workflow document (GenAI_project_governance_high-level_workflow)
+and UN SGB draft bulletin on Responsible Use of AI (The_Responsible_Use_of_AI_DRAFT_SGB_2025_72)
+
+
+================================================================================
+24. KNOWN ISSUES & PENDING TASKS
+================================================================================
+
+───── CRITICAL — Do immediately ─────
+ISSUE A: Azure AD Tenant Blocked (AADSTS5000225)
+  Users cannot log in to ai.truos.io
+  Tenant ID: 4db4e22f-83ed-4093-8d8a-c73b1e559459
+  20-day window from 2026-03-26 (expires ~2026-04-15)
+  Action: Call Microsoft support — see Section 26
+
+ISSUE B: Credential Rotation Required
+  Previous session exposed live credentials in chat
+  All keys must be rotated before continuing development
+  See Section 27 for full checklist
+
+───── HIGH PRIORITY ─────
+TASK 1: Fix GitHub Actions CI/CD (pytest exit code 5)
+  Exit code 5 = pytest collected zero tests or import-level failure
+  Most likely cause: evaluator.py and report.py have no test_ functions
+  pytest tries to collect them and fails
+  Fix options:
+    a) Add to ci.yml pytest command: --ignore=tests/evaluator.py --ignore=tests/report.py
+    b) Add PYTHONPATH=. to ci.yml env section
+    c) Rename helpers to _evaluator.py and _report.py (pytest ignores underscore prefix)
+  Investigate:
+    gh run list --repo truos-official/governance-demo-agentic --limit 10
+    gh run view --repo truos-official/governance-demo-agentic --log-failed
+    Reproduce locally: venv\Scripts\activate && python -m pytest tests/ -v
+
+───── IN PROGRESS ─────
+TASK 2: Complete FrameworkTab.js two-layer visual separation
+  Replace STEPS const with full 57-requirement dataset (Section 13)
+  Update Level 2/3 rendering:
+    Section A "Governance Standard" — neutral bg, universal req + control
+    Section B "Live Compliance Evidence" — colored, live metric + status + tab link
+  Add all static metric keys to get_metrics() in api.py (Section 10)
+  Add total_feedback = client.scard("feedback:all") to get_metrics()
+  Claude Code prompt: already written and ready
+
+TASK 3: Complete App.js navigation restructure
+  Two-zone navigation with Lucide icons (Section 11)
+  Claude Code prompt: already written and ready
+
+───── PENDING ─────
+TASK 4: Push all changes to GitHub + deploy to Azure production
+  Prerequisites: Tasks 1-3 complete, credentials rotated, tenant reactivated
+
+
+================================================================================
+25. TROUBLESHOOTING QUICK REFERENCE
+================================================================================
+
+Quick health check:
+  curl https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io/health
+
+Test Redis connectivity locally:
+  python -c "
+  import redis, os
+  r = redis.Redis(
+    host='governance-redis.redis.cache.windows.net',
+    port=6380,
+    password='REDIS_PASSWORD',
+    ssl=True,
+    ssl_cert_reqs=None,
+    socket_timeout=5
+  )
+  print(r.ping())
+  "
+
+Common errors → root cause → fix:
+
+  "Timeout reading from socket"
+    → REDIS_SSL env var is false or empty
+    → Set REDIS_SSL=true in .env
+
+  "invalid username-password pair"
+    → ssl_cert_reqs is the string "none" instead of Python None
+    → OR username parameter is present in redis.Redis() call
+    → Fix: ssl_cert_reqs=None (Python), remove any username= argument
+
+  Image runs on local Mac but fails on Azure Container Apps
+    → Built without --platform linux/amd64
+    → Rebuild: docker build --no-cache --platform linux/amd64 ...
+
+  New endpoint returning 404 in production
+    → Old Docker image cached — new endpoint not in container
+    → Rebuild with --no-cache and redeploy
+
+  CORS error on frontend
+    → New domain not in CORS_ORIGINS env var
+    → Add to Key Vault secret "cors-origins" and redeploy backend
+
+  "Access Pending Approval" screen on login
+    → New user correctly waiting for admin approval — expected behaviour
+    → Approve via Admin tab (gear icon)
+
+  pytest exit code 5
+    → No test functions collected
+    → Add --ignore flags for helper modules (see Task 1 in Section 24)
+
+  AADSTS5000225 on login
+    → Azure AD tenant blocked due to inactivity
+    → See Section 26
+
+  Container revision activating slowly
+    az containerapp revision list --name governance-backend \
+      --resource-group rg-governance-demo -o table
+    Wait 30-60 seconds for new revision to become active
+
+  Frontend showing old version after deploy
+    → Hard refresh: Ctrl+Shift+R
+    → Verify build folder matches expected changes before deploying
+
+  staticwebapp.config rules not applying
+    → Check filename is staticwebapp.config.json (not .config without .json)
+    → Check role is "authenticated" not a custom role name
+
+
+================================================================================
+26. AZURE AD TENANT ISSUE (AADSTS5000225)
+================================================================================
+
+Error      : AADSTS5000225: This tenant has been blocked due to inactivity
+Tenant ID  : 4db4e22f-83ed-4093-8d8a-c73b1e559459
+Blocked on : 2026-03-26 02:15:25Z  (UTC)
+Deadline   : 20 days from block date — approximately 2026-04-15
+             TENANT IS PERMANENTLY DELETED AFTER THIS DATE
+
+Trace ID        : ba0b9366-fc9d-4529-af02-389e94971800
+Correlation ID  : 019d27ec-d325-7142-a0ad-e13579bd3520
+
+Impact:
+  - Users cannot authenticate at ai.truos.io
+  - Azure Portal may be inaccessible via normal login
+  - Backend, Redis, Elasticsearch, Key Vault still operational
+
+Step 1 — Try direct tenant URL first (incognito browser):
+  https://portal.azure.com/4db4e22f-83ed-4093-8d8a-c73b1e559459
+  OR
+  https://portal.azure.com/truos.io
+
+Step 2 — Call Microsoft support:
+  URL   : https://support.microsoft.com/topic/global-customer-service-phone-numbers
+  Say   : "Authenticator" when prompted → routes to live agent
+  State : "My Azure AD tenant has been blocked with error AADSTS5000225.
+           I am within the 20-day reactivation window."
+  Provide:
+    Tenant ID      : 4db4e22f-83ed-4093-8d8a-c73b1e559459
+    Admin email    : info@truos.io
+    Trace ID       : ba0b9366-fc9d-4529-af02-389e94971800
+    Correlation ID : 019d27ec-d325-7142-a0ad-e13579bd3520
+    Timestamp      : 2026-03-26 02:15:25Z
+
+Step 3 — Alternative support path:
+  Create free Microsoft 365 trial with different email
+  From new tenant Admin Center → Help & support → create case
+  Reference blocked tenant ID
+
+After reactivation:
+  No code changes required — login will work immediately
+  To prevent recurrence: sign in at least once every 90 days
+
+
+================================================================================
+27. CREDENTIAL ROTATION CHECKLIST
+================================================================================
+
+Credentials were exposed in a previous chat session and MUST be rotated.
+Complete all steps before resuming development.
+
+Step 1 — OpenAI API Key
+  URL     : https://platform.openai.com/api-keys
+  Action  : Revoke existing key, generate new key
+  Update  :
+    az keyvault secret set --vault-name gov-demo-kv-truos --name openai-api-key --value "NEW"
+    gh secret set OPENAI_API_KEY --repo truos-official/governance-demo-agentic --body "NEW"
+    Update local .env file
+
+Step 2 — Redis Primary Key
+  URL     : Azure Portal → governance-redis → Access keys → Regenerate primary
+  Update  :
+    az keyvault secret set --vault-name gov-demo-kv-truos --name redis-password --value "NEW"
+    gh secret set REDIS_PASSWORD --repo truos-official/governance-demo-agentic --body "NEW"
+    Update local .env file
+
+Step 3 — Elasticsearch API Key
+  URL     : https://cloud.elastic.co → governance project → API keys → Create new + delete old
+  Update  :
+    az keyvault secret set --vault-name gov-demo-kv-truos --name elastic-api-key --value "NEW"
+    gh secret set ELASTIC_API_KEY --repo truos-official/governance-demo-agentic --body "NEW"
+    Update local .env file
+
+Step 4 — Azure Language Services Key
+  URL     : Azure Portal → governance-language → Keys and Endpoint → Regenerate Key 1
+  Update  :
+    az keyvault secret set --vault-name gov-demo-kv-truos --name azure-language-key --value "NEW"
+    gh secret set AZURE_LANGUAGE_KEY --repo truos-official/governance-demo-agentic --body "NEW"
+    Update local .env file
+
+Step 5 — LangSmith API Key
+  URL     : https://app.smith.langchain.com → Settings → API keys → Create new + revoke old
+  Update  :
+    az keyvault secret set --vault-name gov-demo-kv-truos --name langchain-api-key --value "NEW"
+    gh secret set LANGCHAIN_API_KEY --repo truos-official/governance-demo-agentic --body "NEW"
+    Update local .env file
+
+Step 6 — Redeploy backend to pick up new Key Vault values
+  az containerapp update \
+    --name governance-backend \
+    --resource-group rg-governance-demo \
+    --image governancedemoacr.azurecr.io/governance-backend:v5
+
+  NOTE: Container App reads Key Vault secrets at container startup.
+  Updating Key Vault does NOT automatically restart the container.
+  Must trigger a new revision (even with same image) to pick up new secret values.
+  Force restart: az containerapp revision restart --name governance-backend \
+    --resource-group rg-governance-demo \
+    --revision REVISION_NAME
+
+Step 7 — Verify
+  curl https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io/health
+  Should return {"status":"healthy","redis":"connected"}
+
+
+================================================================================
+END OF HANDOFF DOCUMENT v2
+================================================================================
+Project  : UN Secretariat AI Governance Assistant
+Owner    : Tristan Gitman, Head of AI Governance, OICT
+Contact  : tristan.gitman@un.org
+Repo     : https://github.com/truos-official/governance-demo-agentic
+Generated: March 2026
+================================================================================
