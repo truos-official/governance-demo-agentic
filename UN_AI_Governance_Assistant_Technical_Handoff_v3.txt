@@ -1,0 +1,660 @@
+================================================================================
+  UN AI GOVERNANCE ASSISTANT — COMPLETE TECHNICAL HANDOFF
+  Version 3 | Last updated: 2026-04-16 | Author: Tristan Gitman
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1.  Project Overview
+2.  Live URLs
+3.  Full Architecture
+4.  Azure Infrastructure (exact resource names)
+5.  Key Vault Secrets (gov-demo-kv-truos)
+6.  GitHub Repository & CI/CD
+7.  Repository File Map
+8.  Local Development Setup
+9.  Full Rebuild & Redeploy Playbook
+10. Data Layer (Elasticsearch + Redis)
+11. External Service Accounts
+12. Known Issues & Fixes Applied
+13. Security Notes
+14. Useful Commands Reference
+
+
+================================================================================
+1. PROJECT OVERVIEW
+================================================================================
+
+A production-grade AI governance assistant built on 9 UN policy documents.
+Demonstrates responsible AI principles: RAG retrieval, hallucination detection,
+PII anonymization, semantic caching, adversarial query protection, and
+fine-tuned LLM responses.
+
+Tech stack:
+  - Backend:   FastAPI (Python 3.11), deployed as Azure Container App
+  - Frontend:  React, deployed as Azure Static Web App
+  - LLM:       GPT-4o-mini (fine-tuned on UN governance corpus)
+  - Retrieval: Hybrid BM25 + kNN over Elasticsearch (2,059 chunks, 9 docs)
+  - Cache:     Azure Cache for Redis (semantic cosine similarity >= 0.95)
+  - Security:  Azure Language Services (PII detection/redaction)
+  - Observability: LangSmith (LLM tracing), Weights & Biases (eval tracking)
+
+
+================================================================================
+2. LIVE URLS
+================================================================================
+
+Frontend (production):
+  https://ai.truos.io
+  https://proud-smoke-08513440f.2.azurestaticapps.net  (Azure default hostname)
+
+Backend API (production):
+  https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io
+
+Backend health check:
+  https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io/health
+
+API endpoints:
+  POST /query              Main RAG query endpoint
+  GET  /metrics            System metrics dashboard
+  GET  /security-events    Security event counters
+  POST /register           User registration
+  GET  /user-profile/{id}  Get user profile
+  GET  /users              All registered users (admin)
+  POST /auth/approve        Approve a pending user
+  POST /auth/revoke         Revoke a user
+  GET  /auth/validate/{id} Validate user status
+  POST /feedback           Submit query feedback
+  GET  /feedback/export    Export all feedback
+  POST /clear-cache         Clear semantic cache
+  POST /reset-metrics       Reset Redis metrics
+
+
+================================================================================
+3. FULL ARCHITECTURE
+================================================================================
+
+  Browser (ai.truos.io)
+      │
+      ▼
+  Azure Static Web Apps  [governance-frontend]
+  (React, Free tier, East US 2)
+      │  HTTPS POST to backend
+      ▼
+  Azure Container Apps  [governance-backend]
+  (FastAPI, 0.5 CPU / 1Gi RAM, 1–3 replicas, East US)
+      │
+      ├──► Azure Cache for Redis  [governance-redis]
+      │    (Basic C0, Redis 6, SSL port 6380, East US)
+      │    Used for: semantic cache, metrics counters, user profiles,
+      │              feedback records, rate limiting
+      │
+      ├──► Elasticsearch Cloud (Azure)
+      │    (Index: un_documents_index, 2,059 chunks, 1,536-dim vectors)
+      │    Used for: hybrid BM25 + kNN document retrieval
+      │
+      ├──► OpenAI API
+      │    Models: gpt-4o-mini (fine-tuned), text-embedding-3-small
+      │    Used for: LLM responses, query classification, embeddings,
+      │              semantic cache vectorization, hallucination detection
+      │
+      ├──► Azure Language Services
+      │    (East US, Cognitive Services)
+      │    Used for: PII detection and text redaction before LLM
+      │
+      └──► Azure Key Vault  [gov-demo-kv-truos]
+           (RBAC mode, soft-delete enabled, East US)
+           Used for: all production secrets (injected as env vars at startup)
+
+  Azure Container Registry  [governancedemoacr]
+  (Basic, East US)
+  Stores Docker images. Tagged by git commit SHA in CI/CD.
+
+  Secret flow:
+    Key Vault → Container App managed identity (SystemAssigned)
+    → secrets mounted as env vars at revision startup
+
+
+================================================================================
+4. AZURE INFRASTRUCTURE (exact resource names)
+================================================================================
+
+Subscription:  TRUOS Azure Subscription
+Subscription ID: a022ff24-58dd-48b0-a8b5-0791dbdb06e6
+Tenant ID:     4db4e22f-83ed-4093-8d8a-c73b1e559459
+Resource Group: rg-governance-demo (East US)
+Azure Portal:  https://portal.azure.com/#@infotruos.onmicrosoft.com/resource/subscriptions/a022ff24-58dd-48b0-a8b5-0791dbdb06e6/resourceGroups/rg-governance-demo/overview
+
+┌─────────────────────────────┬──────────────────────────────────────────────────────────┬────────────────────┐
+│ Resource                    │ Name / Hostname                                          │ SKU / Notes        │
+├─────────────────────────────┼──────────────────────────────────────────────────────────┼────────────────────┤
+│ Container Registry          │ governancedemoacr                                        │ Basic              │
+│                             │ governancedemoacr.azurecr.io                             │                    │
+├─────────────────────────────┼──────────────────────────────────────────────────────────┼────────────────────┤
+│ Container Apps Environment  │ governance-env                                           │ East US            │
+├─────────────────────────────┼──────────────────────────────────────────────────────────┼────────────────────┤
+│ Container App (backend)     │ governance-backend                                       │ 0.5 CPU / 1Gi      │
+│                             │ governance-backend.greenbay-a269b9fb.eastus              │ 1–3 replicas       │
+│                             │   .azurecontainerapps.io                                 │ SystemAssigned MI  │
+│                             │ Managed Identity Principal ID:                           │                    │
+│                             │   af88fe79-3051-4ca1-beff-6ceb87929239                  │                    │
+├─────────────────────────────┼──────────────────────────────────────────────────────────┼────────────────────┤
+│ Static Web App (frontend)   │ governance-frontend                                      │ Free               │
+│                             │ proud-smoke-08513440f.2.azurestaticapps.net              │ East US 2          │
+│                             │ Custom domain: ai.truos.io                               │                    │
+├─────────────────────────────┼──────────────────────────────────────────────────────────┼────────────────────┤
+│ Azure Cache for Redis       │ governance-redis                                         │ Basic C0           │
+│                             │ governance-redis.redis.cache.windows.net                 │ Redis 6, SSL 6380  │
+├─────────────────────────────┼──────────────────────────────────────────────────────────┼────────────────────┤
+│ Key Vault                   │ gov-demo-kv-truos                                        │ RBAC mode          │
+│                             │ https://gov-demo-kv-truos.vault.azure.net                │ Soft-delete ON     │
+├─────────────────────────────┼──────────────────────────────────────────────────────────┼────────────────────┤
+│ Azure Language Services     │ (in East US, Cognitive Services)                         │ PII detection      │
+│                             │ https://eastus.api.cognitive.microsoft.com/              │                    │
+└─────────────────────────────┴──────────────────────────────────────────────────────────┴────────────────────┘
+
+RBAC roles granted on gov-demo-kv-truos:
+  info@truos.io                        → Key Vault Secrets Officer  (granted 2026-04-16)
+  governance-backend managed identity  → Key Vault Secrets User     (at provision time)
+
+Image naming convention in ACR:
+  governancedemoacr.azurecr.io/governance-backend:<git-commit-sha>
+  governancedemoacr.azurecr.io/governance-backend:latest
+  Current revision image: ac80ad7fc318cfe6e9d49573d65db19312161413
+
+
+================================================================================
+5. KEY VAULT SECRETS (gov-demo-kv-truos)
+================================================================================
+
+All 12 secrets are injected as environment variables into the Container App
+via Key Vault secret references (identityref:system). A new container revision
+must be created for secret value changes to take effect.
+
+Secret Name (KV)         Env Var Name              Description
+-----------------------  ------------------------  -----------------------------------
+OPENAI-API-KEY           OPENAI_API_KEY            OpenAI API key (sk-proj-...)
+                                                   Updated: 2026-04-16
+REDIS-HOST               REDIS_HOST                governance-redis.redis.cache.windows.net
+REDIS-PORT               REDIS_PORT                6380
+REDIS-PASSWORD           REDIS_PASSWORD            Azure Redis primary access key
+REDIS-SSL                REDIS_SSL                 true
+ELASTIC-ENDPOINT         ELASTIC_ENDPOINT          Elasticsearch Cloud HTTPS endpoint
+ELASTIC-API-KEY          ELASTIC_API_KEY           Elasticsearch API key (Base64)
+LANGCHAIN-API-KEY        LANGCHAIN_API_KEY         LangSmith API key (lsv2_pt_...)
+LANGCHAIN-PROJECT        LANGCHAIN_PROJECT         un-governance-demo
+AZURE-LANGUAGE-ENDPOINT  AZURE_LANGUAGE_ENDPOINT   https://eastus.api.cognitive.microsoft.com/
+AZURE-LANGUAGE-KEY       AZURE_LANGUAGE_KEY        Azure Language Services key
+CORS-ORIGINS             CORS_ORIGINS              Comma-separated allowed origins
+                                                   Current value:
+                                                   http://localhost:3000,
+                                                   https://proud-smoke-08513440f.2.azurestaticapps.net,
+                                                   https://ai.truos.io
+
+Additional env vars set directly on Container App (not from KV):
+  LANGCHAIN_TRACING_V2           = true
+  REDIS_SOCKET_TIMEOUT           = 10
+  REDIS_SOCKET_CONNECT_TIMEOUT   = 10
+
+To update a secret and restart:
+  az keyvault secret set --vault-name gov-demo-kv-truos --name <SECRET-NAME> --value "<new-value>"
+  az containerapp update --name governance-backend --resource-group rg-governance-demo \
+    --revision-suffix $(date +%Y%m%d%H%M%S)
+
+
+================================================================================
+6. GITHUB REPOSITORY & CI/CD
+================================================================================
+
+Repo:    https://github.com/truos-official/governance-demo-agentic
+Branch:  main (only branch; direct push deploys to production)
+Git user: truos-official
+
+CI/CD:  .github/workflows/ci.yml
+        Triggers: push to main, pull_request to main, workflow_dispatch
+
+Path filters (dorny/paths-filter@v3):
+  backend:  src/**, data/**, requirements*.txt, Dockerfile, ci.yml
+  frontend: frontend/**, ci.yml
+
+Jobs and conditions:
+  Detect Changes     → always runs, sets backend/frontend flags
+  Run Backend Tests  → if backend changed; runs pytest tests/
+  Build Frontend     → if frontend changed; npm ci && npm run build
+  Deploy Backend     → if backend changed + push to main:
+                       docker build → push to ACR → az containerapp update
+  Deploy Frontend    → if frontend changed + push to main:
+                       npm build → az staticwebapp secrets → SWA deploy
+
+Node.js runtime:  Node.js 24 (opted in via FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true, 2026-04-16)
+
+GitHub Actions secrets required (Settings → Secrets and variables → Actions):
+  AZURE_CREDENTIALS        Service principal JSON (Contributor on rg-governance-demo)
+  REACT_APP_API_URL        Backend URL
+  OPENAI_API_KEY           OpenAI key (for tests)
+  REDIS_HOST / PORT / PASSWORD / SSL
+  ELASTIC_ENDPOINT / API_KEY
+  LANGCHAIN_API_KEY
+  AZURE_LANGUAGE_ENDPOINT / KEY
+  (See scripts/github-secrets.txt for exact setup commands)
+
+
+================================================================================
+7. REPOSITORY FILE MAP
+================================================================================
+
+Root
+├── .env.example                 Template of all required env vars (copy to .env)
+├── .env                         LOCAL ONLY — gitignored, never commit
+├── .gitignore
+├── Dockerfile                   Backend container (python:3.11-slim, port 80)
+├── docker-compose.yml           Local dev: backend:8000 + frontend:3000
+├── requirements.prod.txt        Production Python dependencies (32 packages)
+├── requirements.txt             Dev dependencies (wraps prod + pytest/jupyter)
+├── README.md                    Public-facing project documentation
+├── UN_AI_Governance_Assistant_Technical_Handoff_v2.txt  Previous handoff
+├── UN_AI_Governance_Assistant_Technical_Handoff_v3.txt  THIS DOCUMENT
+├── evaluation_results.json      Evaluation run output
+│
+├── src/                         FastAPI backend source
+│   ├── api.py                   Main app: FastAPI, CORS, all endpoints
+│   ├── rag_chain.py             RAG pipeline orchestration
+│   ├── elastic_retriever.py     Hybrid BM25 + kNN Elasticsearch search
+│   ├── elastic_indexer.py       Index UN docs into Elasticsearch (run to rebuild index)
+│   ├── query_classifier.py      Detects query intent/style via LLM
+│   ├── hallucination_detector.py Confidence scoring on LLM answers
+│   ├── security.py              Rate limiting, injection detection, PII via Azure
+│   ├── semantic_cache.py        Redis cosine similarity cache (TTL 1h)
+│   ├── metrics_tracker.py       Redis counters + LangSmith + ES metrics
+│   ├── prompt_library.py        Prompt templates by query style
+│   ├── rag_retriever.py         ChromaDB-based retriever (local fallback)
+│   ├── pdf_processor.py         PDF → processed text pipeline
+│   ├── fine_tuner.py            GPT fine-tuning job submission
+│   ├── fine_tune_data_generator.py  Generate fine-tune training data
+│   ├── fine_tune_evaluator.py   Evaluate fine-tuned model
+│   ├── topic_classifier.py      Topic classification
+│   ├── topic_extractor.py       Topic extraction from documents
+│   ├── dashboard.py             Streamlit dashboard (local dev only)
+│   └── hello.py                 Stub
+│
+├── frontend/                    React app
+│   ├── Dockerfile               nginx-based container
+│   ├── nginx.conf               nginx config (SPA routing)
+│   ├── staticwebapp.config.json Azure SWA routing rules
+│   ├── .env                     REACT_APP_API_URL=http://localhost:8000
+│   ├── .env.production          REACT_APP_API_URL=<production backend URL>
+│   ├── package.json / lock      Node dependencies
+│   └── src/
+│       ├── App.js               Main app shell, tab routing, auth gate
+│       ├── components/
+│       │   ├── QueryTab.js      Main chat/query interface
+│       │   ├── AnalyticsTab.js  Metrics dashboard
+│       │   ├── SecurityTab.js   Security events view
+│       │   ├── AdminTab.js      User management (admin only)
+│       │   ├── ArchitectureTab.js  System architecture diagram
+│       │   ├── FrameworkTab.js  AI governance framework
+│       │   ├── GovernanceTab.js UN governance documents view
+│       │   ├── ResponsibleAITab.js  Responsible AI principles
+│       │   ├── EvalTab.js       Evaluation results
+│       │   └── AuthGate.js      Google/Microsoft OAuth gate
+│       └── index.js
+│
+├── data/
+│   ├── pdfs/                    9 source UN PDF documents (tracked in git)
+│   │   ├── G2507018.PDF         (and 8 others)
+│   ├── processed/               Extracted text (gitignored — regenerate with pdf_processor.py)
+│   ├── fine_tune_data.jsonl     Fine-tuning training data (tracked)
+│   ├── document_titles.json     Doc metadata (tracked)
+│   └── chroma_db/               Local vector DB (gitignored — regenerate with elastic_indexer.py)
+│
+├── tests/
+│   ├── test_smoke.py            Smoke tests (run in CI)
+│   ├── conftest.py              pytest fixtures
+│   ├── bulk_test.py             Bulk query tests
+│   ├── evaluator.py             Model evaluation harness
+│   ├── report.py                Test report generator
+│   └── data/test_cases.json     Test case definitions
+│
+├── infra/
+│   └── provision.sh             Azure CLI script: creates ALL resources from scratch
+│
+└── scripts/
+    ├── keyvault-sync.sh         Push all secrets to Key Vault from env vars
+    ├── configure-containerapp.sh Wire KV secret references to container env vars
+    └── github-secrets.txt       Documents every GitHub Actions secret + how to get it
+
+
+================================================================================
+8. LOCAL DEVELOPMENT SETUP
+================================================================================
+
+Prerequisites:
+  - Python 3.11
+  - Node.js 20+
+  - Docker Desktop
+  - Azure CLI (az login as info@truos.io)
+
+Step 1 — Clone and configure:
+  git clone https://github.com/truos-official/governance-demo-agentic.git
+  cd governance-demo-agentic
+  cp .env.example .env
+  # Fill in all values in .env (see Section 5 for where to get each secret)
+
+Step 2 — Backend:
+  python -m venv venv
+  venv\Scripts\activate          # Windows
+  pip install -r requirements.txt
+  uvicorn src.api:app --reload --port 8000
+
+Step 3 — Frontend:
+  cd frontend
+  npm ci
+  npm start                      # Starts on http://localhost:3000
+  # Uses REACT_APP_API_URL=http://localhost:8000 from frontend/.env
+
+Step 4 — Docker Compose (alternative to steps 2+3):
+  docker-compose up --build
+  # Backend: http://localhost:8000
+  # Frontend: http://localhost:3000
+
+CORS in local dev: http://localhost:3000 is always in the default CORS_ORIGINS.
+
+
+================================================================================
+9. FULL REBUILD & REDEPLOY PLAYBOOK
+================================================================================
+
+Use this if ALL Azure infrastructure has been deleted and needs recreation.
+
+Prerequisites:
+  az login  (as info@truos.io — Owner on subscription)
+  Docker running
+  All secret values on hand (OpenAI key, Elasticsearch creds, etc.)
+
+--- STEP 1: Provision Azure infrastructure ---
+  chmod +x infra/provision.sh
+  ./infra/provision.sh
+  # Creates: resource group, ACR, Redis, Key Vault, Container Apps env,
+  #          Container App (with system identity), Static Web App
+  # NOTE: Redis takes ~15 minutes to provision. Script continues; Redis
+  #       will be ready by the time you need it.
+
+--- STEP 2: Populate Key Vault ---
+  export OPENAI_API_KEY="sk-proj-..."
+  export REDIS_HOST="governance-redis.redis.cache.windows.net"
+  export REDIS_PORT="6380"
+  export REDIS_PASSWORD="<from Azure portal: governance-redis → Access keys>"
+  export REDIS_SSL="true"
+  export ELASTIC_ENDPOINT="https://..."
+  export ELASTIC_API_KEY="..."
+  export LANGCHAIN_API_KEY="lsv2_pt_..."
+  export LANGCHAIN_PROJECT="un-governance-demo"
+  export AZURE_LANGUAGE_ENDPOINT="https://eastus.api.cognitive.microsoft.com/"
+  export AZURE_LANGUAGE_KEY="..."
+  export CORS_ORIGINS="http://localhost:3000,https://<swa-hostname>,https://ai.truos.io"
+  chmod +x scripts/keyvault-sync.sh
+  ./scripts/keyvault-sync.sh
+
+--- STEP 3: Wire secrets to Container App ---
+  chmod +x scripts/configure-containerapp.sh
+  ./scripts/configure-containerapp.sh
+
+--- STEP 4: Rebuild Elasticsearch index ---
+  # Activate venv and set .env, then:
+  python src/elastic_indexer.py
+  # This reads data/processed/*.txt, generates embeddings via OpenAI,
+  # and bulk-indexes into Elasticsearch. Takes ~10 minutes for 2,059 chunks.
+  # IMPORTANT: data/processed/ is gitignored. If missing, run first:
+  #   python src/pdf_processor.py
+
+--- STEP 5: Set GitHub Actions secrets ---
+  # See scripts/github-secrets.txt for exact values and CLI commands
+  # Go to: https://github.com/truos-official/governance-demo-agentic/settings/secrets/actions
+
+--- STEP 6: Deploy via CI/CD ---
+  # Trigger a full deploy by making any change to src/ or frontend/:
+  git commit --allow-empty -m "chore: trigger redeploy"
+  git push origin main
+  # CI/CD builds Docker image, pushes to ACR, deploys Container App + SWA
+
+--- STEP 7: Verify ---
+  curl https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io/health
+  # Expected: {"status":"healthy","redis":"connected"}
+
+  curl -X POST .../query \
+    -H "Content-Type: application/json" \
+    -H "Origin: https://ai.truos.io" \
+    -d '{"question":"What is responsible AI?","user_id":"test"}'
+  # Expected: 200 with answer field, no CORS errors
+
+
+================================================================================
+10. DATA LAYER
+================================================================================
+
+--- ELASTICSEARCH ---
+Provider:  Elastic Cloud on Azure (elastic.co)
+Index:     un_documents_index
+Endpoint:  https://my-elasticsearch-project-f2452a.es.eastus2.azure.elastic.cloud:443
+Chunks:    2,059 (chunk size 500 tokens, overlap 50)
+Mapping:
+  content    → text (BM25 keyword search)
+  source     → keyword
+  embedding  → dense_vector, dims=1536 (text-embedding-3-small)
+
+Retrieval strategy (elastic_retriever.py):
+  hybrid_search() = keyword_search(top_k*2) + vector_search(top_k*2)
+  → deduplicate by _id → sort by _score → return top_k
+
+To rebuild index from scratch:
+  python src/elastic_indexer.py
+  (requires ELASTIC_ENDPOINT, ELASTIC_API_KEY, OPENAI_API_KEY in .env)
+
+--- REDIS ---
+Instance:  governance-redis.redis.cache.windows.net:6380 (SSL)
+Provider:  Azure Cache for Redis, Basic C0, Redis 6
+
+Key schema:
+  user:{user_id}:profile          → JSON string (user registration data)
+  users:all                       → Set of all user_ids
+  users:approved / pending / revoked → Sets by status
+  metrics:total_queries           → Counter
+  metrics:style:{style}           → Counter per query style
+  metrics:source:{doc}            → Counter per source document
+  metrics:latencies               → List (last 1000 latency values, float)
+  metrics:cache_hits              → Counter
+  metrics:hallucinations          → Counter
+  metrics:pii_detected            → Counter
+  metrics:pii_entity:{type}       → Counter per PII entity type
+  security:injection / pii / rate_limit → Security event counters
+  user:{id}:total_queries         → Counter
+  user:{id}:hallucinations        → Counter
+  user:{id}:style:{style}         → Counter
+  user:{id}:latencies             → List
+  user:{id}:last_active           → ISO timestamp string
+  feedback:{query_id}             → JSON string (feedback record)
+  feedback:all / positive / negative → Sets of query_ids
+  cache:{hash}                    → JSON (semantic cache entry, TTL 3600s)
+                                    Contains: query, answer, prompt_type, topic, vector
+
+Redis data is EPHEMERAL — metrics and cache rebuild from usage.
+User registrations and feedback are lost if Redis is wiped.
+There is no automated backup of Redis data.
+
+
+================================================================================
+11. EXTERNAL SERVICE ACCOUNTS
+================================================================================
+
+OpenAI
+  Account:   info@truos.io / tristangitman@gmail.com
+  Project:   agentic-applications
+  Models:    gpt-4o-mini (fine-tuned version used in prod), text-embedding-3-small
+  Key:       Stored in Key Vault secret OPENAI-API-KEY
+  Dashboard: https://platform.openai.com/
+  Note:      Key was exhausted (insufficient_quota) 2026-04-16 and replaced.
+             Monitor usage at platform.openai.com/usage
+
+Elasticsearch (Elastic Cloud)
+  Project:   my-elasticsearch-project-f2452a
+  Region:    Azure East US 2
+  Index:     un_documents_index (2,059 document chunks)
+  Console:   https://cloud.elastic.co/
+  Note:      API key uses Base64 encoding — do not URL-decode when storing.
+
+LangSmith (observability)
+  Project:   un-governance-demo
+  Console:   https://smith.langchain.com/
+  Note:      Tracing enabled in production (LANGCHAIN_TRACING_V2=true)
+
+Weights & Biases (experiment tracking)
+  Run:       run-ufhara0u (2026-03-10)
+  Console:   https://wandb.ai/
+
+Azure Language Services
+  Endpoint:  https://eastus.api.cognitive.microsoft.com/
+  Used for:  PII entity detection and text redaction (recognize_pii_entities)
+
+
+================================================================================
+12. KNOWN ISSUES & FIXES APPLIED
+================================================================================
+
+2026-04-16 — OpenAI quota exhausted
+  Symptom: All POST /query calls returned HTTP 500 "Internal Server Error".
+           Frontend showed this as a CORS error (misleading).
+  Root cause: openai.RateLimitError code=insufficient_quota on embeddings call
+              (elastic_retriever.py:31 → embed_query) and query classifier.
+  Fix: Updated OPENAI_API_KEY in Key Vault + .env. Forced new container revision.
+  Prevention: Monitor usage at platform.openai.com/usage. Set billing alerts.
+
+2026-04-16 — CORS false alarm
+  Symptom: Browser reported CORS error on /query.
+  Actual cause: HTTP 500 from backend (see above). CORS was correctly configured.
+  Note: When backend crashes before sending response headers, browsers
+        report it as a CORS error. Always check backend logs first.
+  How to verify CORS is working:
+    curl -v -X OPTIONS <backend>/query \
+      -H "Origin: https://ai.truos.io" \
+      -H "Access-Control-Request-Method: POST"
+    Look for: access-control-allow-origin: https://ai.truos.io
+
+2026-04-16 — Key Vault RBAC not set for info@truos.io
+  Symptom: az keyvault secret show/set/list all returned ForbiddenByRbac.
+  Root cause: info@truos.io had Owner on subscription and Secrets Officer on
+              aigov-kv (different vault) but NOT on gov-demo-kv-truos.
+  Fix: Granted Key Vault Secrets Officer role via ARM REST API:
+    az rest --method PUT \
+      --url "https://management.azure.com/.../roleAssignments/<uuid>?api-version=2022-04-01" \
+      --body '{"properties":{"roleDefinitionId":"...b86a8fe4...","principalId":"7df538c9...","principalType":"User"}}'
+  Note: az role assignment create kept failing with MissingSubscription error
+        (Azure CLI bug); ARM REST API call succeeded.
+
+2026-04-16 — GitHub Actions Node.js 20 deprecation warning
+  Actions affected: actions/checkout@v4, dorny/paths-filter@v3
+  Fix: Added FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true to workflow env block.
+  Deadline: June 2026 (would have broken without fix).
+
+
+================================================================================
+13. SECURITY NOTES
+================================================================================
+
+.env file:
+  - Gitignored. NEVER commit .env to git.
+  - Contains live secrets for local dev only.
+  - Production secrets ONLY live in Key Vault.
+
+Secret rotation:
+  - Update Key Vault secret value
+  - Force new container revision (see Section 5 rotation command)
+  - Update GitHub Actions secret if also used in CI
+
+CORS policy (api.py:26-33):
+  - Origins read from CORS_ORIGINS env var (comma-separated)
+  - .strip() applied to each origin (whitespace-safe)
+  - allow_credentials=True requires explicit origins (no wildcard)
+  - Current allowed origins: localhost:3000, SWA default, ai.truos.io
+
+Rate limiting (security.py):
+  - In-memory sliding window: 10 requests/user/60s
+  - NOT Redis-backed — resets on container restart/scale-out
+  - Each replica has independent rate limit state
+
+Admin user:
+  - Defined by ADMIN_EMAIL env var (default: tristan.gitman@un.org)
+  - Admin status granted automatically on /register if email matches
+  - Admin can approve/revoke other users via /auth/approve and /auth/revoke
+
+
+================================================================================
+14. USEFUL COMMANDS REFERENCE
+================================================================================
+
+--- Check production health ---
+curl https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io/health
+
+--- Test CORS for ai.truos.io ---
+curl -v -X OPTIONS \
+  https://governance-backend.greenbay-a269b9fb.eastus.azurecontainerapps.io/query \
+  -H "Origin: https://ai.truos.io" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: Content-Type"
+
+--- View live container logs ---
+az containerapp logs show \
+  --name governance-backend \
+  --resource-group rg-governance-demo \
+  --tail 100
+
+--- Force new container revision (picks up KV secret changes) ---
+az containerapp update \
+  --name governance-backend \
+  --resource-group rg-governance-demo \
+  --revision-suffix $(date +%Y%m%d%H%M%S)
+
+--- List current container revisions ---
+az containerapp revision list \
+  --name governance-backend \
+  --resource-group rg-governance-demo \
+  -o table
+
+--- Get current Docker image ---
+az containerapp show \
+  --name governance-backend \
+  --resource-group rg-governance-demo \
+  --query "properties.template.containers[0].image" -o tsv
+
+--- List all Key Vault secrets ---
+az keyvault secret list --vault-name gov-demo-kv-truos --query "[].name" -o tsv
+
+--- Update a Key Vault secret ---
+az keyvault secret set \
+  --vault-name gov-demo-kv-truos \
+  --name <SECRET-NAME> \
+  --value "<new-value>"
+
+--- Get Redis access key ---
+az redis list-keys \
+  --name governance-redis \
+  --resource-group rg-governance-demo \
+  --query primaryKey -o tsv
+
+--- Check what Azure account is active ---
+az account show --query "{user:user.name, sub:name}" -o table
+
+--- Run backend tests locally ---
+source venv/Scripts/activate
+python -m pytest tests/ -v --ignore=tests/evaluator.py --ignore=tests/report.py
+
+--- Rebuild Elasticsearch index ---
+source venv/Scripts/activate
+python src/elastic_indexer.py
+
+--- Trigger CI/CD without a code change ---
+git commit --allow-empty -m "chore: trigger redeploy"
+git push origin main
+
+================================================================================
+END OF DOCUMENT
+================================================================================
